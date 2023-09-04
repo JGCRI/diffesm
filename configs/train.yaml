@@ -1,0 +1,7 @@
+defaults:
+  - _self_
+  - data: mnist
+  - paths: default
+
+# Seed for random number generators
+seed: 42
