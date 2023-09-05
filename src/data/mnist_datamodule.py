@@ -46,6 +46,11 @@ class MNISTDataModule(L.LightningDataModule):
         """Return the number of classes."""
         return 10
 
+    @property
+    def spatial_size(self) -> tuple[int, int]:
+        """Return the spatial size of the images."""
+        return (28, 28)
+
     def prepare_data(self) -> None:
         """Download data if needed. Lightning ensures that `self.prepare_data()` is called only
         within a single process on CPU, so you can safely add your downloading logic within. In
@@ -97,7 +102,7 @@ class MNISTDataModule(L.LightningDataModule):
             shuffle=True,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader[Any]:
         """Create and return the val dataloader.
 
         :return: The val dataloader.
@@ -110,7 +115,7 @@ class MNISTDataModule(L.LightningDataModule):
             shuffle=False,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> DataLoader[Any]:
         """Create and return the test dataloader.
 
         :return: The test dataloader.

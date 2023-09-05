@@ -14,7 +14,7 @@ rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
-def main(cfg: DictConfig):
+def main(cfg: DictConfig) -> None:
     # Set seed for random number generators
     if cfg.get("seed"):
         L.seed_everything(cfg.seed, workers=True)
@@ -22,7 +22,7 @@ def main(cfg: DictConfig):
     # Init logger
     logging.info(f"Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = instantiate(cfg.data)
-
+    print(datamodule.num_classes)
     # logging.info(f"Instantiating model <{cfg.model._target_}>")
     # model = DNN(data_module.image_size, data_module.num_classes)
     # classifier = Classifier(model)
