@@ -1,0 +1,16 @@
+_target_: src.trainers.trainer2d.Trainer2D
+
+epochs: 20
+use_ema: false
+log_interval: 50
+
+skip_training: false
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0001
+dataloader:
+  shuffle: True
+  batch_size: 128
+  num_workers: 4
+  pin_memory: false
+  drop_last: false

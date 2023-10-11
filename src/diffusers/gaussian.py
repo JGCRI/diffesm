@@ -68,6 +68,7 @@ class GaussianDiffusion(nn.Module):
         self,
         model: nn.Module,
         image_size: tuple[int, int],
+        channels: int,
         timesteps: int = 1000,
         sampling_timesteps: Optional[int] = None,
         objective: str = "pred_v",
@@ -80,13 +81,11 @@ class GaussianDiffusion(nn.Module):
         min_snr_gamma: int = 5,
     ) -> None:
         super().__init__()
-        assert not (type(self) == GaussianDiffusion and model.channels != model.out_dim)
-        assert not model.random_or_learned_sinusoidal_cond
 
         self.model = model
 
-        self.channels = self.model.channels
-        self.self_condition = self.model.self_condition
+        self.channels = channels
+        self.self_condition = False  # CHANGE THIS STAT
 
         self.image_size = image_size
 
@@ -128,7 +127,7 @@ class GaussianDiffusion(nn.Module):
 
         # helper function to register buffer from float64 to float32
         def register_buffer(name: str, val: Any) -> None:
-            return super().register_buffer(name, val.to(torch.float32))
+            return self.register_buffer(name, val.to(torch.float32))
 
         register_buffer("betas", betas)
         register_buffer("alphas_cumprod", alphas_cumprod)
@@ -354,6 +353,7 @@ class GaussianDiffusion(nn.Module):
 
         img = torch.randn(shape, device=device)
         imgs = [img]
+        x_start_list = []
 
         x_start = None
 
@@ -364,12 +364,15 @@ class GaussianDiffusion(nn.Module):
         ):
             self_cond = x_start if self.self_condition else None
             img, x_start = self.p_sample(img, t, self_cond)
+            x_start_list.append(x_start)
             imgs.append(img)
 
         ret = img if not return_all_timesteps else torch.stack(imgs, dim=1)
+        x_start_list = torch.stack(x_start_list, dim=1)
 
         ret = self.unnormalize(ret)
-        return ret
+        x_start_list = self.unnormalize(x_start_list)
+        return ret, x_start_list
 
     @torch.inference_mode()
     def ddim_sample(self, shape: list[int], return_all_timesteps: bool = False) -> Tensor:
@@ -392,6 +395,7 @@ class GaussianDiffusion(nn.Module):
 
         img = torch.randn(shape, device=device)
         imgs = [img]
+        x_start_list = []
 
         x_start = None
 
@@ -405,6 +409,7 @@ class GaussianDiffusion(nn.Module):
             if time_next < 0:
                 img = x_start
                 imgs.append(img)
+                x_start_list.append(x_start)
                 continue
 
             alpha = self.alphas_cumprod[time]
@@ -418,18 +423,24 @@ class GaussianDiffusion(nn.Module):
             img = x_start * alpha_next.sqrt() + c * pred_noise + sigma * noise
 
             imgs.append(img)
+            x_start_list.append(x_start)
 
         ret = img if not return_all_timesteps else torch.stack(imgs, dim=1)
+        x_start_list = torch.stack(x_start_list, dim=1)
 
         ret = self.unnormalize(ret)
-        return ret
+        x_start_list = self.unnormalize(x_start_list)
+        return ret, x_start_list
 
     @torch.inference_mode()
-    def sample(self, batch_size: int = 16, return_all_timesteps: bool = False) -> Tensor:
-        image_size, channels = self.image_size, self.channels
+    def sample(
+        self, batch_size: int = 16, return_all_timesteps: bool = False
+    ) -> tuple[Tensor, Tensor]:
+        height, width = self.image_size
+        channels = self.channels
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
         return sample_fn(
-            (batch_size, channels, image_size, image_size),
+            (batch_size, channels, height, width),
             return_all_timesteps=return_all_timesteps,
         )
 
@@ -560,7 +571,9 @@ class GaussianDiffusion(nn.Module):
             img.device,
             self.image_size,
         )
-        assert h == img_size and w == img_size, f"height and width of image must be {img_size}"
+        assert (
+            h == img_size[0] and w == img_size[1]
+        ), f"height and width of image must be {img_size}"
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
         img = self.normalize(img)
