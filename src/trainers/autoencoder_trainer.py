@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 import torch
 from accelerate import Accelerator
+from diffusers import AutoencoderKL
 from omegaconf.dictconfig import DictConfig
 from torch import Tensor
 from torch._dynamo.eval_frame import OptimizedModule
@@ -15,8 +16,7 @@ from tqdm import tqdm
 
 import wandb
 from data.celeba_hq_dataset import CelebAHQ
-from diffusers import AutoencoderKL
-from models.modules.loss import PerceptualAdversarialLoss
+from src.models.loss import PerceptualAdversarialLoss
 
 
 class AutoEncoderTrainer:

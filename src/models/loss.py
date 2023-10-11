@@ -5,16 +5,31 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from models.modules.discriminator import PatchGANDiscriminator
+from src.models.discriminator import PatchGANDiscriminator
 
 
-def adopt_weight(weight, global_step, threshold=0, value=0.0):
+def adopt_weight(
+    weight: Tensor,
+    global_step: int,
+    threshold: Optional[int] = 0,
+    value: Optional[float] = 0.0,
+):
+    """If global step is below the threshold, adopt a default value."""
     if global_step < threshold:
         weight = value
     return weight
 
 
-def hinge_d_loss(logits_real, logits_fake):
+def hinge_d_loss(logits_real: Tensor, logits_fake: Tensor) -> Tensor:
+    """Standard Hinge loss for GAN discriminator.
+
+    Args:
+        logits_real (Tensor): Output from real image
+        logits_fake (Tensor): Output from generated image
+
+    Returns:
+        Tensor: The loss value
+    """
     loss_real = torch.mean(F.relu(1.0 - logits_real))
     loss_fake = torch.mean(F.relu(1.0 + logits_fake))
     d_loss = 0.5 * (loss_real + loss_fake)
@@ -45,7 +60,19 @@ class PerceptualAdversarialLoss(nn.Module):
 
         self.logvar = nn.Parameter(torch.ones(size=()) * logvar_init)
 
-    def calculate_adaptive_weight(self, nll_loss, g_loss, last_layer=None):
+    def calculate_adaptive_weight(
+        self, nll_loss: Tensor, g_loss: Tensor, last_layer: nn.Module = None
+    ):
+        """Adapts the weight based on the gradient values in the last layer.
+
+        Args:
+            nll_loss (Tensor): Negative log likelihood loss
+            g_loss (Tensor): Generative loss (usually hinge)
+            last_layer (nn.Module, optional): Last layer of decoder in autoencoder
+
+        Returns:
+            Tensor: The weighting value for the discriminator
+        """
         if last_layer is not None:
             nll_grads = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
             g_grads = torch.autograd.grad(g_loss, last_layer, retain_graph=True)[0]

@@ -1,12 +1,12 @@
 _target_: trainers.autoencoder_trainer.AutoEncoderTrainer
 
 loss:
-  _target_: models.modules.loss.PerceptualAdversarialLoss
+  _target_: models.loss.PerceptualAdversarialLoss
   kl_weight: 0.000001
   disc_weight: 0.5
   disc_start: 50000
   discriminator:
-    _target_: models.modules.discriminator.PatchGANDiscriminator
+    _target_: models.discriminator.PatchGANDiscriminator
     dim_in: 3
     dim: 64
     num_layers: 3
