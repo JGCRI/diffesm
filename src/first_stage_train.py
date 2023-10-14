@@ -11,7 +11,7 @@ from diffusers import AutoencoderKL
 from trainers.autoencoder_trainer import AutoEncoderTrainer
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="train.yaml")
+@hydra.main(version_base=None, config_path="../configs", config_name="first_stage.yaml")
 def main(cfg: DictConfig) -> None:
     # Create accelerator object and set RNG seed
     accelerator: Accelerator = instantiate(cfg.accelerator)

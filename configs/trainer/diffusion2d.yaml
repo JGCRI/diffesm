@@ -1,0 +1,32 @@
+_target_: trainers.diffusion_trainer.DiffusionTrainer
+
+hyperparameters:
+  skip_training: false
+  epochs: 300
+  use_ema: false
+  save_dir: checkpoints
+  save_name: lets_go_beast
+  load_dir: checkpoints
+  load_name: lets_go_beast
+  lr: 0.0001
+
+dataloader:
+  _target_: torch.utils.data.DataLoader
+  _partial_: True
+  shuffle: True
+  batch_size: 64
+  num_workers: 4
+  pin_memory: false
+  drop_last: false
+
+autoencoder_opt:
+  _target_: torch.optim.Adam
+  _partial_: True
+  lr: ${..hyperparameters.lr}
+  betas: [0.5, 0.9]
+
+disc_opt:
+  _target_: torch.optim.Adam
+  _partial_: True
+  lr: ${..hyperparameters.lr}
+  betas: [0.5, 0.9]

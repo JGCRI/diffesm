@@ -1,0 +1,24 @@
+defaults:
+  - _self_
+  - data: celeb
+  - autoencoder: autoencoder
+  - model: unet2d
+  - scheduler: ddpm
+  - trainer: autoencoder2d
+  - paths: default
+
+accelerator:
+  _target_: accelerate.Accelerator
+  mixed_precision: fp16
+  split_batches: True
+  gradient_accumulation_steps: 1
+  log_with: wandb
+
+# Seed for random number generators
+seed: 50
+
+wandb:
+  project_name: diffesm
+  init_kwargs:
+    name: test
+    mode: online

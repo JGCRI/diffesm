@@ -4,23 +4,20 @@ from typing import Any, Callable
 
 import torch
 from accelerate import Accelerator
-from diffusers import AutoencoderKL
+from diffusers import AutoencoderKL, UNet2DModel
 from omegaconf.dictconfig import DictConfig
 from torch import Tensor
 from torch._dynamo.eval_frame import OptimizedModule
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.optim import Optimizer
-from torch.utils.data import DataLoader
 from torchvision.utils import make_grid
 from tqdm import tqdm
 
 import wandb
 from data.celeba_hq_dataset import CelebAHQ
-from src.models.loss import PerceptualAdversarialLoss
 from src.trainers.base_trainer import BaseTrainer
 
 
-class AutoEncoderTrainer(BaseTrainer):
+class DiffusionTrainer(BaseTrainer):
     """Trainer class for 2D diffusion models."""
 
     def __init__(
@@ -28,12 +25,11 @@ class AutoEncoderTrainer(BaseTrainer):
         train_set: CelebAHQ,
         val_set: CelebAHQ,
         autoencoder: AutoencoderKL,
-        loss: PerceptualAdversarialLoss,
+        model: UNet2DModel,
         accelerator: Accelerator,
         hyperparameters: DictConfig,
         dataloader: Callable[[Any], DataLoader],
-        autoencoder_opt: Callable[[Any], Optimizer],
-        disc_opt: Callable[[Any], Optimizer],
+        optimizer: Callable[[Any], Optimizer],
     ) -> None:
         # Assign the hyperparameters to class attributes
         self.save_hyperparameters(hyperparameters)
@@ -80,12 +76,39 @@ class AutoEncoderTrainer(BaseTrainer):
             self.val_loader,
         )
 
+    def save_hyperparameters(self, cfg: DictConfig) -> None:
+        """Saves the hyperparameters as class attributes."""
+        for key, value in cfg.items():
+            setattr(self, key, value)
+
+    def normalize(self, batch: Tensor) -> Tensor:
+        """Normalizes the batch to be between -1 and 1."""
+        return batch * 2 - 1
+
+    def denormalize(self, batch: Tensor) -> Tensor:
+        """Denormalizes the batch to be between 0 and 1."""
+        return (batch + 1) / 2
+
     def get_last_layer(self):
         """Gets the last layer of the autoencoder."""
         if type(self.autoencoder) == DDP or type(self.autoencoder) == OptimizedModule:
             return self.autoencoder.module.decoder.conv_out.weight
         else:
             return self.autoencoder.decoder.conv_out.weight
+
+    def train(self) -> None:
+        """Runs the main training loop."""
+
+        # Sanity check the validation loop and sampling before training
+        self.validation_loop(epoch=0, sanity_check=True)
+        self.sample()
+
+        for epoch in range(self.start_epoch, self.epochs):
+            if not self.skip_training:
+                self.training_loop(epoch)
+            self.validation_loop(epoch)
+            self.sample()
+            self.save(epoch)
 
     def training_loop(self, epoch: int) -> None:
         """Runs a single epoch of training.
@@ -121,15 +144,8 @@ class AutoEncoderTrainer(BaseTrainer):
             # Update the loss metric and take an update step
             self.global_step += 1
             self.accelerator.log(
-                {
-                    "Training/Total Loss": ae_loss,
-                    "Training/Disc Loss": disc_loss,
-                    "Epoch": epoch,
-                }
-                | {
-                    f"Training/{metric}": value.item()
-                    for metric, value in loss_dict.items()
-                },
+                {"Training/Total Loss": ae_loss, "Training/Disc Loss": disc_loss, "Epoch": epoch}
+                | {f"Training/{metric}": value.item() for metric, value in loss_dict.items()},
                 step=self.global_step,
             )
 
@@ -215,24 +231,16 @@ class AutoEncoderTrainer(BaseTrainer):
         stacked_images = torch.cat([batch, pred_x], dim=0)
 
         grid = make_grid(stacked_images, nrow=5)
-        self.accelerator.log(
-            {"Reconstructions": wandb.Image(grid)}, step=self.global_step
-        )
-        self.accelerator.log(
-            {"Latent Space": wandb.Image(latent_mean)}, step=self.global_step
-        )
+        self.accelerator.log({"Reconstructions": wandb.Image(grid)}, step=self.global_step)
+        self.accelerator.log({"Latent Space": wandb.Image(latent_mean)}, step=self.global_step)
 
-    def model_forward_pass(
-        self, batch: tuple[Tensor, Tensor] | Tensor
-    ) -> tuple[Tensor, Tensor]:
+    def model_forward_pass(self, batch: tuple[Tensor, Tensor] | Tensor) -> tuple[Tensor, Tensor]:
         """Given a single batch, sends it through the diffuser to obtain a loss and then
         backpropagates the loss."""
 
         if type(self.autoencoder) == DDP or type(self.autoencoder) == OptimizedModule:
             posterior = self.autoencoder.module.tiled_encode(batch).latent_dist
-            reconstructions = self.autoencoder.module.tiled_decode(
-                posterior.mean
-            ).sample
+            reconstructions = self.autoencoder.module.tiled_decode(posterior.mean).sample
         else:
             posterior = self.autoencoder.tiled_encode(batch).latent_dist
             reconstructions = self.autoencoder.tiled_decode(posterior.mean).sample
@@ -248,9 +256,7 @@ class AutoEncoderTrainer(BaseTrainer):
             # Wait for all processes to reach this point
             self.accelerator.wait_for_everyone()
             state_dict = {
-                "Autoencoder": self.accelerator.unwrap_model(
-                    self.autoencoder
-                ).state_dict(),
+                "Autoencoder": self.accelerator.unwrap_model(self.autoencoder).state_dict(),
                 "Discriminator": self.accelerator.unwrap_model(
                     self.loss
                 ).discriminator.state_dict(),
@@ -264,9 +270,7 @@ class AutoEncoderTrainer(BaseTrainer):
             os.makedirs(self.save_dir, exist_ok=True)
 
             # Add an extension if one doesn't exist
-            save_name = (
-                self.save_name if "." in self.save_name else self.save_name + ".pt"
-            )
+            save_name = self.save_name if "." in self.save_name else self.save_name + ".pt"
 
             # Every 10 epochs, append the epoch number to save it
             if epoch % 10 == 0:
@@ -283,12 +287,8 @@ class AutoEncoderTrainer(BaseTrainer):
             return
         else:
             # Add an extension if one doesn't exist
-            load_name = (
-                self.load_name if "." in self.load_name else self.load_name + ".pt"
-            )
-            state_dict = torch.load(
-                os.path.join(self.load_dir, load_name), map_location="cpu"
-            )
+            load_name = self.load_name if "." in self.load_name else self.load_name + ".pt"
+            state_dict = torch.load(os.path.join(self.load_dir, load_name), map_location="cpu")
 
             # Load trainer variables
             self.start_epoch = state_dict["Epoch"]
