@@ -1,11 +1,10 @@
 from typing import Optional
 
-import lpips
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from src.models.discriminator import PatchGANDiscriminator
+from models.discriminator import PatchGANDiscriminator
 
 
 def adopt_weight(
@@ -43,20 +42,17 @@ class PerceptualAdversarialLoss(nn.Module):
         disc_start: int,
         logvar_init: float = 0.0,
         kl_weight: float = 1.0,
-        perceptual_weight: float = 1.0,
         disc_factor: float = 1.0,
         disc_weight: float = 1.0,
     ):
         super().__init__()
         self.kl_weight = kl_weight
-        self.perceptual_weight = perceptual_weight
         self.disc_factor = disc_factor
         self.disc_weight = disc_weight
         self.disc_start = disc_start
         self.discriminator = discriminator
 
         self.loss = nn.L1Loss(reduction="none")
-        self.perceptual_loss = lpips.LPIPS(net="vgg").eval()
 
         self.logvar = nn.Parameter(torch.ones(size=()) * logvar_init)
 
@@ -96,11 +92,6 @@ class PerceptualAdversarialLoss(nn.Module):
     ) -> tuple[Tensor, dict[str, float]]:
         # Standard L1 Loss - not reduced per pixel, rather per image
         rec_loss = self.loss(inputs.contiguous(), reconstructions.contiguous())
-
-        # Use a pretrained VGG to get a perceptual loss
-        if self.perceptual_weight > 0:
-            p_loss = self.perceptual_loss(inputs.contiguous(), reconstructions.contiguous())
-            rec_loss = rec_loss + self.perceptual_weight * p_loss
 
         # self.logvar is a learned parameter to control the importance of rec loss
         nll_loss = rec_loss / torch.exp(self.logvar) + self.logvar

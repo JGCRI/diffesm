@@ -1,8 +1,7 @@
 defaults:
   - _self_
-  - data: celeb
+  - data: ipsl
   - model: autoencoder
-  - diffuser: gaussian2d
   - trainer: autoencoder2d
   - paths: default
 

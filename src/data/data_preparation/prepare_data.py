@@ -1,26 +1,25 @@
+import argparse
 import json
 import os
-import argparse
-from typing_extensions import TypedDict
 
-import xarray as xr
 import dask
+import xarray as xr
+from typing_extensions import TypedDict
 
 # Constants
 COW_PATH = "/research/hutchinson/"
 CLUSTER_PATH = "/cluster/research-groups/hutchinson"
 
-DATA_DICT = TypedDict(
-    "DATA_DICT",
-    {
-        "load_dir": str,
-        "save_dir": str,
-        "scenario": str,
-        "realizations": dict[str, dict[str, list[str]]],
-    },
-)
 
-# Cut off all data at this date
+class DATA_DICT(TypedDict):
+    load_dir: str
+    save_dir: str
+    scenario: str
+    realizations: dict[str, dict[str, list[str]]]
+
+
+# Cut off all data not included in this range
+START_DATE = 1850
 END_DATE = 2100
 
 # How many chunks to split the data into - this will create NUM_CHUNKS separate files to hold the dat
@@ -28,7 +27,7 @@ NUM_CHUNKS = 40
 
 
 def save_dataset(dataset: xr.Dataset, realization: str, save_dir: str):
-    """Saves the dataset in chunks to many netCDF4 files for parallel loading later"""
+    """Saves the dataset in chunks to many netCDF4 files for parallel loading later."""
 
     # Create the save directory if it doesn't already exist
     full_save_dir = os.path.join(save_dir, realization)
@@ -64,7 +63,7 @@ def save_dataset(dataset: xr.Dataset, realization: str, save_dir: str):
 
 
 def process_dataset(dataset: xr.Dataset) -> xr.Dataset:
-    """Does any pre-processing of the dataset necessary before we save it to chunks
+    """Does any pre-processing of the dataset necessary before we save it to chunks.
 
     Args:
         dataset (xr.Dataset): Our data
@@ -73,8 +72,10 @@ def process_dataset(dataset: xr.Dataset) -> xr.Dataset:
         xr.Dataset: Our processed data
     """
 
+    dataset = dataset.drop_vars(['time_bnds', 'lat_bnds', 'lon_bnds'], errors='ignore')
+
     # Drop all the time indices that are greater than 2100
-    dataset = dataset.sel(time=slice(None, f"{END_DATE}-12-31"))
+    dataset = dataset.sel(time=slice(f"{START_DATE}-01-01", f"{END_DATE}-12-31"))
 
     return dataset
 
@@ -84,29 +85,8 @@ def collect_var_data(path_list: list[str], base_dir: str) -> xr.Dataset:
 
     all_data = []
     for path in path_list:
-        all_data.append(xr.open_dataset(os.path.join(base_dir, path), engine="netcdf4"))
-    return xr.concat(all_data, dim="time")
-
-
-def merge_variables(var_data_dict: dict[str, xr.Dataset]) -> xr.Dataset:
-    """Merges all the variables together for a given realization."""
-
-    # Precipitation coordinates can be buggy so just reassign them from temperature
-    var_data_dict["pr"].coords["time"] = var_data_dict["tas"].coords["time"]
-
-    # Separate the variables into a list
-    separated_variables = [
-        data[var] for var, data in sorted(var_data_dict.items(), key=lambda x: x[0])
-    ]
-
-    # Concatenate variables along new dimension and then set the name for that dimension
-    merged = xr.concat(separated_variables, dim="var")
-    merged["var"] = sorted(list(var_data_dict.keys()))
-
-    # Create a dataset out of the datarray
-    merged = xr.Dataset(dict(samples=merged))
-
-    return merged
+        all_data.append(xr.open_dataset(os.path.join(base_dir, path)))
+    return xr.concat(all_data, dim="time").sortby("time")
 
 
 def main(filename: str, cluster=False):
@@ -117,7 +97,7 @@ def main(filename: str, cluster=False):
         cluster (bool, optional): Whether we are on the cluster or not. Defaults to False.
     """
     # Open a json file
-    with open(filename, "r") as f:
+    with open(filename) as f:
         data: DATA_DICT = json.load(f)
 
     # Construct the paths to the load and save directories
@@ -130,12 +110,12 @@ def main(filename: str, cluster=False):
 
     # Iterate through each realization in our JSON file
     for realization, realization_data in data["realizations"].items():
-        # Store the xarray dataset for each
-        dataset = merge_variables(
-            {
-                var: collect_var_data(path_list, load_dir)
-                for var, path_list in realization_data.items()
-            }
+        # Merge the two variables together
+        dataset = xr.merge(
+            [
+                collect_var_data(path_list, load_dir)
+                for path_list in realization_data.values()
+            ]
         )
 
         dataset = process_dataset(dataset)

@@ -7,7 +7,7 @@ loss:
   disc_start: 50000
   discriminator:
     _target_: models.discriminator.PatchGANDiscriminator
-    dim_in: 3
+    dim_in: 2
     dim: 64
     num_layers: 3
     norm_layer: batchnorm
@@ -15,19 +15,20 @@ loss:
 hyperparameters:
   skip_training: false
   epochs: 300
+  train_batch_size: 2
+  val_batch_size: 2
   use_ema: false
   save_dir: checkpoints
   save_name: lets_go_beast
   load_dir: checkpoints
-  load_name: lets_go_beast
+  load_name: null
   lr: 0.0001
 
 dataloader:
-  _target_: torch.utils.data.DataLoader
+  _target_: data.climate_dataset.climate_dataloader
   _partial_: True
   shuffle: True
-  batch_size: 64
-  num_workers: 4
+  num_workers: 0
   pin_memory: false
   drop_last: false
 

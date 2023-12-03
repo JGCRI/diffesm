@@ -1,16 +1,19 @@
-import hydra
-import torch
-from accelerate import Accelerator
-from accelerate.logging import get_logger
-from accelerate.utils import set_seed
-from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
+import hydra
+from hydra.utils import instantiate
+from accelerate import Accelerator
+from accelerate.utils import set_seed
+from accelerate.logging import get_logger
+from diffusers import UNet3DConditionModel, DDPMScheduler
+from imagen_pytorch import Unet3D
 
-from data.celeba_hq_dataset import CelebAHQ
-from diffusers import AutoencoderKL, UNet2DModel, DDPMScheduler
-from trainers.diffusion_trainer import DiffusionTrainer
+from data.climate_dataset import ClimateDataset
+from trainers.unet_trainer import UNetTrainer
 
-@hydra.main(version_base=None, config_path="../configs", config_name="train.yaml")
+
+@hydra.main(
+    version_base=None, config_path="../configs", config_name="train_unet.yaml"
+)
 def main(cfg: DictConfig) -> None:
     # Create accelerator object and set RNG seed
     accelerator: Accelerator = instantiate(cfg.accelerator)
@@ -26,17 +29,14 @@ def main(cfg: DictConfig) -> None:
 
     # Avoid race conditions when loading data
     with accelerator.main_process_first():
-        train_set: CelebAHQ = instantiate(train_cfg, _recursive_=False)
-        val_set: CelebAHQ = instantiate(val_cfg, _recursive_=False)
+        train_set: ClimateDataset = instantiate(train_cfg, _recursive_=False)
+        val_set: ClimateDataset = instantiate(val_cfg, _recursive_=False)
 
-    logger.info(f"Instantiating Autoencoder <{cfg.autoencoder._target_}>")
-    autoencoder: AutoencoderKL = torch.compile(instantiate(cfg.autoencoder))
+    logger.info(f"Instantiating model <{cfg.model._target_}>")
+    model: Unet3D = instantiate(cfg.model)
 
-    logger.info(f"Instantiating Model <{cfg.model._target_}>")
-    model: UNet2DModel = torch.compile(instantiate(cfg.model))
-
-    logger.info(f"Instantiating Scheduler <{cfg.scheduler._target_}>")
-    scheduler : DDPMScheduler = instantiate(cfg.scheduler)
+    logger.info(f"Instantiating scheduler <{cfg.scheduler._target_}>")
+    scheduler: DDPMScheduler = instantiate(cfg.scheduler)
 
     # Start experiment tracking
     logger.info("Initializing Wandb")
@@ -47,13 +47,13 @@ def main(cfg: DictConfig) -> None:
     )
 
     logger.info(f"Instantiating Trainer <{cfg.trainer._target_}>")
-    trainer: DiffusionTrainer = instantiate(
+    trainer: UNetTrainer = instantiate(
         cfg.trainer,
         train_set,
         val_set,
-        autoencoder=autoencoder,
         model=model,
         accelerator=accelerator,
+        scheduler=scheduler,
     )
 
     logger.info("Starting training")

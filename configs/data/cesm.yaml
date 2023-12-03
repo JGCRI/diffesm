@@ -1,11 +1,13 @@
-_target_: 
-json_path: 
+_target_:
+json_path:
 
 shared:
   _target_: data.climate_data.ClimateDataset
 
 train:
   data_dir: ${paths.data_dir}/CESM/rcp85_train.json
+  seq_len: 2
 
 val:
   data_dir: ${paths.data_dir}/CESM/rcp85_val.json
+  seq_len: 28

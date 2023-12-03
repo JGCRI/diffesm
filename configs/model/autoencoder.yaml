@@ -1,8 +1,7 @@
 _target_: diffusers.AutoencoderKL
-in_channels: 3
-out_channels: 3
+in_channels: 2
+out_channels: 2
 down_block_types:
-  - DownEncoderBlock2D
   - DownEncoderBlock2D
   - DownEncoderBlock2D
   - DownEncoderBlock2D
@@ -10,13 +9,10 @@ up_block_types:
   - UpDecoderBlock2D
   - UpDecoderBlock2D
   - UpDecoderBlock2D
-  - UpDecoderBlock2D
 block_out_channels:
   - 64
   - 128
-  - 256
-  - 256
+  - 128
 latent_channels: 4
 act_fn: silu
-sample_size: 128
-force_upcast: false
+sample_size: 96

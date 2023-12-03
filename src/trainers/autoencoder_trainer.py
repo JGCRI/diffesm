@@ -13,11 +13,12 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torchvision.utils import make_grid
 from tqdm import tqdm
-
+from einops import rearrange
 import wandb
-from data.celeba_hq_dataset import CelebAHQ
-from src.models.loss import PerceptualAdversarialLoss
-from src.trainers.base_trainer import BaseTrainer
+
+from data.climate_dataset import ClimateDataset, climate_dataloader
+from models.loss import PerceptualAdversarialLoss
+from trainers.base_trainer import BaseTrainer
 
 
 class AutoEncoderTrainer(BaseTrainer):
@@ -25,8 +26,8 @@ class AutoEncoderTrainer(BaseTrainer):
 
     def __init__(
         self,
-        train_set: CelebAHQ,
-        val_set: CelebAHQ,
+        train_set: ClimateDataset,
+        val_set: ClimateDataset,
         autoencoder: AutoencoderKL,
         loss: PerceptualAdversarialLoss,
         accelerator: Accelerator,
@@ -49,8 +50,7 @@ class AutoEncoderTrainer(BaseTrainer):
         self.autoencoder_opt = autoencoder_opt(self.autoencoder.parameters())
         self.disc_opt = disc_opt(self.loss.discriminator.parameters())
 
-        self.train_loader = dataloader(self.train_set)
-        self.val_loader = dataloader(self.val_set)
+        self.dataloader_fn: climate_dataloader = dataloader
 
         # Initialize counters
         self.global_step = 0
@@ -69,20 +69,16 @@ class AutoEncoderTrainer(BaseTrainer):
             self.loss,
             self.autoencoder_opt,
             self.disc_opt,
-            self.train_loader,
-            self.val_loader,
         ) = self.accelerator.prepare(
             self.autoencoder,
             self.loss,
             self.autoencoder_opt,
             self.disc_opt,
-            self.train_loader,
-            self.val_loader,
         )
 
     def get_last_layer(self):
         """Gets the last layer of the autoencoder."""
-        if type(self.autoencoder) == DDP or type(self.autoencoder) == OptimizedModule:
+        if type(self.autoencoder) == DDP:
             return self.autoencoder.module.decoder.conv_out.weight
         else:
             return self.autoencoder.decoder.conv_out.weight
@@ -96,27 +92,22 @@ class AutoEncoderTrainer(BaseTrainer):
         self.loss.train()
 
         # Only display progress bar on main process
-        pbar = tqdm(
-            self.train_loader,
-            unit="batch",
+        train_loader = self.dataloader_fn(
+            dataset=self.train_set,
+            accelerator=self.accelerator,
+            batch_size=self.train_batch_size,
             desc=f"Training Epoch {epoch}",
-            disable=not self.accelerator.is_main_process,
+            disable_tqdm=not self.accelerator.is_main_process,
         )
-        for batch_idx, batch in enumerate(pbar):
+
+        for batch_idx, batch in enumerate(train_loader):
             if epoch == self.start_epoch and batch_idx < (
-                self.global_step % len(self.train_loader)
+                self.global_step % self.train_set.estimate_num_batches(self.train_batch_size)
             ):
                 continue
-            batch = self.normalize(batch)
-            reconstructions, posterior = self.model_forward_pass(batch)
 
-            ae_loss, disc_loss, loss_dict = self.loss(
-                batch,
-                reconstructions,
-                posterior,
-                self.global_step,
-                last_layer=self.get_last_layer(),
-            )
+            # Send the batch through our autoencoder to obtain loss
+            ae_loss, disc_loss, loss_dict = self.model_forward_pass(batch)
 
             # Update the loss metric and take an update step
             self.global_step += 1
@@ -142,11 +133,6 @@ class AutoEncoderTrainer(BaseTrainer):
             self.accelerator.backward(disc_loss)
             self.disc_opt.step()
 
-            pbar.set_postfix(
-                {
-                    "Training AE Loss": ae_loss.item(),
-                }
-            )
 
     @torch.inference_mode()
     def validation_loop(self, epoch: int, sanity_check=False) -> None:
@@ -161,28 +147,21 @@ class AutoEncoderTrainer(BaseTrainer):
         val_metric_dict = defaultdict(lambda: 0)
 
         # Only display progress bar on main process
-        pbar = tqdm(
-            self.val_loader,
-            unit="batch",
-            desc=f"Validation Epoch {epoch}" if not sanity_check else "Sanity Check",
-            disable=not self.accelerator.is_main_process,
+        val_loader = self.dataloader_fn(
+            dataset=self.val_set,
+            accelerator=self.accelerator,
+            batch_size=self.val_batch_size,
+            desc="Validation Epoch {epoch}" if not sanity_check else "Sanity Check",
+            disable_tqdm=not self.accelerator.is_main_process,
         )
+
         # Iterate over the batches
-        for batch_idx, batch in enumerate(pbar):
+        for batch_idx, batch in enumerate(val_loader):
             # If we are sanity checking, only run 10 batches
             if sanity_check and batch_idx > 10:
                 return
 
-            batch = self.normalize(batch)
-            reconstructions, posterior = self.model_forward_pass(batch)
-
-            _, _, loss_dict = self.loss(
-                batch,
-                reconstructions,
-                posterior,
-                global_step=self.global_step,
-                last_layer=self.get_last_layer(),
-            )
+            _, _, loss_dict = self.model_forward_pass(batch)
 
             # Update the loss metric
             for metric, value in loss_dict.items():
@@ -190,8 +169,6 @@ class AutoEncoderTrainer(BaseTrainer):
                 val_metric_dict["Validation/" + metric] += self.accelerator.reduce(
                     value, reduction="mean"
                 ).item()
-
-            pbar.set_postfix({"Validation Loss": loss_dict["Total Loss"]})
 
         # Take the average of all of the metrics and log them
         for metric, value in val_metric_dict.items():
@@ -202,15 +179,21 @@ class AutoEncoderTrainer(BaseTrainer):
     def sample(self) -> None:
         """Samples a batch of images from the model."""
 
+        val_loader = self.dataloader_fn(
+            dataset=self.val_set,
+            accelerator=self.accelerator,
+            batch_size=1,
+            disable_tqdm=True,
+        )
+
         # Get 5 random images from the validation set
         batch = next(iter(self.val_loader))
-        batch = batch[:5]
 
-        reconstruction, posterior = self.model_forward_pass(self.normalize(batch))
+        reconstruction, posterior = self.get_recon_post(self.normalize(batch))
 
         latent_mean = self.denormalize(posterior.mode())
 
-        pred_x = self.denormalize(reconstruction).clamp(min=0, max=1)
+        pred_x = self.denormalize(reconstruction)
 
         stacked_images = torch.cat([batch, pred_x], dim=0)
 
@@ -223,12 +206,32 @@ class AutoEncoderTrainer(BaseTrainer):
         )
 
     def model_forward_pass(
+        self, batch: Tensor
+    ) -> tuple[Tensor, Tensor, dict[str, Tensor]]:
+        # Rearrange the tensor to flatten out batch and time
+        batch = rearrange(batch, "b c t h w -> (b t) c h w")
+        batch = self.normalize(batch)
+        reconstructions, posterior = self.get_recon_post(batch)
+
+        ae_loss, disc_loss, loss_dict = self.loss(
+            batch,
+            reconstructions,
+            posterior,
+            global_step=self.global_step,
+            last_layer=self.get_last_layer(),
+        )
+
+        return ae_loss, disc_loss, loss_dict
+
+    def get_recon_post(
         self, batch: tuple[Tensor, Tensor] | Tensor
     ) -> tuple[Tensor, Tensor]:
-        """Given a single batch, sends it through the diffuser to obtain a loss and then
-        backpropagates the loss."""
+        """Given a single batch, sends it through the autoencoder to get the reconstructions
+        and the posterior distribution"""
 
-        if type(self.autoencoder) == DDP or type(self.autoencoder) == OptimizedModule:
+        # Combine batch and time dimension so that the autoencoder is
+        # trained frame-wise
+        if type(self.autoencoder) == DDP:
             posterior = self.autoencoder.module.tiled_encode(batch).latent_dist
             reconstructions = self.autoencoder.module.tiled_decode(
                 posterior.mean

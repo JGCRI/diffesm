@@ -1,17 +1,19 @@
-import hydra
-import torch
-from accelerate import Accelerator
-from accelerate.logging import get_logger
-from accelerate.utils import set_seed
-from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-
-from data.celeba_hq_dataset import CelebAHQ
+import hydra
+from hydra.utils import instantiate
+from accelerate import Accelerator
+from accelerate.utils import set_seed
+from accelerate.logging import get_logger
 from diffusers import AutoencoderKL
+import torch
+
+from data.climate_dataset import ClimateDataset
 from trainers.autoencoder_trainer import AutoEncoderTrainer
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="first_stage.yaml")
+@hydra.main(
+    version_base=None, config_path="../configs", config_name="pretrain_first_stage.yaml"
+)
 def main(cfg: DictConfig) -> None:
     # Create accelerator object and set RNG seed
     accelerator: Accelerator = instantiate(cfg.accelerator)
@@ -27,8 +29,8 @@ def main(cfg: DictConfig) -> None:
 
     # Avoid race conditions when loading data
     with accelerator.main_process_first():
-        train_set: CelebAHQ = instantiate(train_cfg, _recursive_=False)
-        val_set: CelebAHQ = instantiate(val_cfg, _recursive_=False)
+        train_set: ClimateDataset = instantiate(train_cfg, _recursive_=False)
+        val_set: ClimateDataset = instantiate(val_cfg, _recursive_=False)
 
     logger.info(f"Instantiating model <{cfg.model._target_}>")
     model: AutoencoderKL = torch.compile(instantiate(cfg.model))

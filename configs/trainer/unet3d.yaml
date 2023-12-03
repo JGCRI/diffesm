@@ -1,0 +1,29 @@
+_target_: trainers.unet_trainer.UNetTrainer
+
+hyperparameters:
+  skip_training: false
+  max_steps: 500_000
+  val_every: 5_000
+  warm_up: 20_000
+  use_ema: false
+  save_dir: checkpoints
+  save_name: lets_go_beast
+  load_dir: checkpoints
+  load_name: null
+  lr: 0.0001
+
+dataloader:
+  _target_: data.climate_dataset.ClimateDataLoader
+  _partial_: True
+  shuffle: True
+  batch_size: 2
+  num_workers: 0
+  pin_memory: false
+  drop_last: false
+
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: True
+  lr: ${..hyperparameters.lr}
+

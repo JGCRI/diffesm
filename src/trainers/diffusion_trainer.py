@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 import wandb
 from data.celeba_hq_dataset import CelebAHQ
-from src.trainers.base_trainer import BaseTrainer
+from trainers.base_trainer import BaseTrainer
 
 
 class DiffusionTrainer(BaseTrainer):
@@ -131,7 +131,7 @@ class DiffusionTrainer(BaseTrainer):
             ):
                 continue
             batch = self.normalize(batch)
-            reconstructions, posterior = self.model_forward_pass(batch)
+            reconstructions, posterior = self.get_recon_post(batch)
 
             ae_loss, disc_loss, loss_dict = self.loss(
                 batch,
@@ -144,8 +144,15 @@ class DiffusionTrainer(BaseTrainer):
             # Update the loss metric and take an update step
             self.global_step += 1
             self.accelerator.log(
-                {"Training/Total Loss": ae_loss, "Training/Disc Loss": disc_loss, "Epoch": epoch}
-                | {f"Training/{metric}": value.item() for metric, value in loss_dict.items()},
+                {
+                    "Training/Total Loss": ae_loss,
+                    "Training/Disc Loss": disc_loss,
+                    "Epoch": epoch,
+                }
+                | {
+                    f"Training/{metric}": value.item()
+                    for metric, value in loss_dict.items()
+                },
                 step=self.global_step,
             )
 
@@ -190,7 +197,7 @@ class DiffusionTrainer(BaseTrainer):
                 return
 
             batch = self.normalize(batch)
-            reconstructions, posterior = self.model_forward_pass(batch)
+            reconstructions, posterior = self.get_recon_post(batch)
 
             _, _, loss_dict = self.loss(
                 batch,
@@ -222,7 +229,7 @@ class DiffusionTrainer(BaseTrainer):
         batch = next(iter(self.val_loader))
         batch = batch[:5]
 
-        reconstruction, posterior = self.model_forward_pass(self.normalize(batch))
+        reconstruction, posterior = self.get_recon_post(self.normalize(batch))
 
         latent_mean = self.denormalize(posterior.mode())
 
@@ -231,16 +238,24 @@ class DiffusionTrainer(BaseTrainer):
         stacked_images = torch.cat([batch, pred_x], dim=0)
 
         grid = make_grid(stacked_images, nrow=5)
-        self.accelerator.log({"Reconstructions": wandb.Image(grid)}, step=self.global_step)
-        self.accelerator.log({"Latent Space": wandb.Image(latent_mean)}, step=self.global_step)
+        self.accelerator.log(
+            {"Reconstructions": wandb.Image(grid)}, step=self.global_step
+        )
+        self.accelerator.log(
+            {"Latent Space": wandb.Image(latent_mean)}, step=self.global_step
+        )
 
-    def model_forward_pass(self, batch: tuple[Tensor, Tensor] | Tensor) -> tuple[Tensor, Tensor]:
+    def get_recon_post(
+        self, batch: tuple[Tensor, Tensor] | Tensor
+    ) -> tuple[Tensor, Tensor]:
         """Given a single batch, sends it through the diffuser to obtain a loss and then
         backpropagates the loss."""
 
         if type(self.autoencoder) == DDP or type(self.autoencoder) == OptimizedModule:
             posterior = self.autoencoder.module.tiled_encode(batch).latent_dist
-            reconstructions = self.autoencoder.module.tiled_decode(posterior.mean).sample
+            reconstructions = self.autoencoder.module.tiled_decode(
+                posterior.mean
+            ).sample
         else:
             posterior = self.autoencoder.tiled_encode(batch).latent_dist
             reconstructions = self.autoencoder.tiled_decode(posterior.mean).sample
@@ -256,7 +271,9 @@ class DiffusionTrainer(BaseTrainer):
             # Wait for all processes to reach this point
             self.accelerator.wait_for_everyone()
             state_dict = {
-                "Autoencoder": self.accelerator.unwrap_model(self.autoencoder).state_dict(),
+                "Autoencoder": self.accelerator.unwrap_model(
+                    self.autoencoder
+                ).state_dict(),
                 "Discriminator": self.accelerator.unwrap_model(
                     self.loss
                 ).discriminator.state_dict(),
@@ -270,7 +287,9 @@ class DiffusionTrainer(BaseTrainer):
             os.makedirs(self.save_dir, exist_ok=True)
 
             # Add an extension if one doesn't exist
-            save_name = self.save_name if "." in self.save_name else self.save_name + ".pt"
+            save_name = (
+                self.save_name if "." in self.save_name else self.save_name + ".pt"
+            )
 
             # Every 10 epochs, append the epoch number to save it
             if epoch % 10 == 0:
@@ -287,8 +306,12 @@ class DiffusionTrainer(BaseTrainer):
             return
         else:
             # Add an extension if one doesn't exist
-            load_name = self.load_name if "." in self.load_name else self.load_name + ".pt"
-            state_dict = torch.load(os.path.join(self.load_dir, load_name), map_location="cpu")
+            load_name = (
+                self.load_name if "." in self.load_name else self.load_name + ".pt"
+            )
+            state_dict = torch.load(
+                os.path.join(self.load_dir, load_name), map_location="cpu"
+            )
 
             # Load trainer variables
             self.start_epoch = state_dict["Epoch"]
