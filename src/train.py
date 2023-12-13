@@ -5,10 +5,10 @@ from accelerate import Accelerator
 from accelerate.utils import set_seed
 from accelerate.logging import get_logger
 from diffusers import DDPMScheduler
-from imagen_pytorch import Unet3D
 
 from data.climate_dataset import ClimateDataset
 from trainers.unet_trainer import UNetTrainer
+from models.video_net import UNetModel3D
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="train_unet.yaml")
@@ -34,7 +34,7 @@ def main(cfg: DictConfig) -> None:
         val_set: ClimateDataset = instantiate(val_cfg, _recursive_=False)
 
     logger.info(f"Instantiating model <{cfg.model._target_}>")
-    model: Unet3D = instantiate(cfg.model)
+    model: UNetModel3D = instantiate(cfg.model)
 
     logger.info(f"Instantiating scheduler <{cfg.scheduler._target_}>")
     scheduler: DDPMScheduler = instantiate(cfg.scheduler)

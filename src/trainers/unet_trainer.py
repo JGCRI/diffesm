@@ -4,7 +4,6 @@ from typing import Any, Callable
 import torch
 from accelerate import Accelerator
 from diffusers import SchedulerMixin
-from imagen_pytorch import Unet3D
 from omegaconf.dictconfig import DictConfig
 from torch.optim import Optimizer
 from torch.nn.functional import mse_loss
@@ -12,10 +11,12 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from einops import reduce
 import wandb
+from ema_pytorch import EMA
 
 from utils.viz_utils import create_gif
 from data.climate_dataset import ClimateDataset, ClimateDataLoader
 from trainers.base_trainer import BaseTrainer
+from models.video_net import UNetModel3D
 
 
 class UNetTrainer(BaseTrainer):
@@ -25,7 +26,7 @@ class UNetTrainer(BaseTrainer):
         self,
         train_set: ClimateDataset,
         val_set: ClimateDataset,
-        model: Unet3D,
+        model: UNetModel3D,
         scheduler: SchedulerMixin,
         accelerator: Accelerator,
         hyperparameters: DictConfig,
@@ -40,6 +41,16 @@ class UNetTrainer(BaseTrainer):
         self.train_set, self.val_set = train_set, val_set
         self.model = model
         self.scheduler: SchedulerMixin = scheduler
+
+        self.scheduler.set_timesteps(self.sample_steps)
+
+        # Keep track of our exponential moving average weights
+        self.ema_model = EMA(
+            self.model,
+            beta=0.9999,  # exponential moving average factor
+            update_after_step=100,  # only after this number of .update() calls will it start updating
+            update_every=10,
+        ).to(self.accelerator.device)
 
         # Assign the device and weight dtype (32 bit for training)
         self.device = self.accelerator.device
@@ -109,7 +120,7 @@ class UNetTrainer(BaseTrainer):
     def train(self):
         # Sanity check the validation loop and sampling before training
         for epoch in range(self.first_epoch, self.max_epochs):
-            self.model.train()
+            
             progress_bar = tqdm(
                 total=self.num_steps_per_epoch,
                 disable=not self.accelerator.is_local_main_process,
@@ -117,6 +128,7 @@ class UNetTrainer(BaseTrainer):
             progress_bar.set_description(f"Epoch {epoch}")
 
             for step, batch in enumerate(self.train_loader.generate()):
+                self.model.train()
                 # Skip steps until we reach the resumed step
                 if (
                     self.load_path
@@ -133,11 +145,16 @@ class UNetTrainer(BaseTrainer):
                     # Update counts
                     progress_bar.update(1)
                     self.global_step += 1
+                    self.ema_model.update()
 
                     if self.accelerator.is_main_process:
                         # Check to see if we need to sample from our model
                         if self.global_step % self.sample_every == 0:
                             self.sample()
+
+                        # Check to see if we need to save our model
+                        if self.global_step % self.save_every == 0:
+                            self.save()
 
                 # Metric calculation and logging
                 log_dict = {"Training/Loss": loss.detach().item()}
@@ -148,7 +165,9 @@ class UNetTrainer(BaseTrainer):
 
     def get_loss(self, batch):
         clean_samples = batch.to(self.weight_dtype)
-        cond_map = reduce(clean_samples, "b v t h w -> b v 1 h w", "mean").repeat(1, 1, clean_samples.shape[-3], 1, 1)
+        cond_map = reduce(clean_samples, "b v t h w -> b v 1 h w", "mean").repeat(
+            1, 1, clean_samples.shape[-3], 1, 1
+        )
 
         # Sample noise that we'll add to the clean images
         noise = torch.randn_like(clean_samples)
@@ -161,10 +180,6 @@ class UNetTrainer(BaseTrainer):
         noisy_samples = self.scheduler.add_noise(clean_samples, noise, timesteps)
 
         with self.accelerator.accumulate(self.model):
-            # Start by pretraining without temporal attention
-            ignore_time = (
-                True if self.global_step < self.pretrain_image_steps else False
-            )
             model_output = self.model(
                 noisy_samples,
                 timesteps,
@@ -214,18 +229,27 @@ class UNetTrainer(BaseTrainer):
     def sample(self) -> None:
         """Samples a batch of images from the model."""
 
+        self.ema_model.eval()
         # Grab a random sample from validation set
         batch = next(iter(self.val_loader.generate()))[0:1]
 
         clean_samples = batch.to(self.weight_dtype)
-        cond_map = reduce(clean_samples, "b v t h w -> b v 1 h w", "mean").repeat(1, 1, clean_samples.shape[-3], 1, 1)
+        cond_map = reduce(clean_samples, "b v t h w -> b v 1 h w", "mean").repeat(
+            1, 1, clean_samples.shape[-3], 1, 1
+        )
 
         # Sample noise that we'll add to the clean images
         gen_sample = torch.randn_like(clean_samples)
 
-        for i in tqdm(range(len(self.scheduler) - 1, -1, -1), "Sampling"):
+        # Run the diffusion process in reverse
+        for i in tqdm(
+            range(
+                len(self.scheduler) - 1, -1, -len(self.scheduler) // self.sample_steps
+            ),
+            "Sampling",
+        ):
             timestep = torch.tensor([i] * gen_sample.shape[0], device=self.device)
-            output = self.model(
+            output = self.ema_model(
                 gen_sample,
                 timestep,
                 cond_map=cond_map,
@@ -259,9 +283,8 @@ class UNetTrainer(BaseTrainer):
         if self.save_name is None:
             return
         else:
-            # Wait for all processes to reach this point
-            self.accelerator.wait_for_everyone()
             state_dict = {
+                "EMA": self.ema_model,
                 "Unet": self.accelerator.unwrap_model(self.model).state_dict(),
                 "Optimizer": self.optimizer.state_dict(),
                 "Global Step": self.global_step,

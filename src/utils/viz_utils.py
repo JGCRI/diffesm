@@ -6,7 +6,13 @@ import numpy as np
 
 
 def plot_map(
-    ds  : xr.Dataset, variable: str, levels=None, cmap=None, ax=None, fig=None, colorbar=False
+    ds: xr.Dataset,
+    variable: str,
+    levels=None,
+    cmap=None,
+    ax=None,
+    fig=None,
+    colorbar=False,
 ):
     """Given some geospatial data and what it is, generates a cartopy
     map
@@ -44,29 +50,30 @@ def plot_map(
         transform=ccrs.PlateCarree(),
         cmap=cmap,
         levels=levels,
-        cbar_kwargs={"orientation" : "horizontal"},
+        cbar_kwargs={"orientation": "horizontal"},
         extend="both",
-        interpolation=None
+        interpolation=None,
     )
 
     ax.coastlines()
 
-
     return fig, dataplot
+
 
 def create_gif(ds: xr.Dataset):
     var_frames = {}
     for var in ds.data_vars.keys():
         # Create a list of frames
         frames = []
-        
-        for day in range(ds.time.shape[0]):
 
+        for day in range(ds.time.shape[0]):
             # Create a map of that day
             fig, _ = plot_map(ds.isel(time=day), var)
+            plt.tight_layout(pad=0)
 
+            # Saves the figure to a np array
             with io.BytesIO() as buff:
-                fig.savefig(buff, format='raw', facecolor="w")
+                fig.savefig(buff, format="raw", facecolor="w")
                 buff.seek(0)
                 data = np.frombuffer(buff.getvalue(), dtype=np.uint8)
 
@@ -75,17 +82,15 @@ def create_gif(ds: xr.Dataset):
 
             fig.tight_layout(pad=0)
 
-
             # Add the map to the list of frames
             frames.append(data)
 
             # Close the figure
             plt.close(fig)
-        
+
         frames = np.stack(frames)
         frames = np.transpose(frames, (0, 3, 1, 2))
 
         var_frames[var] = frames
 
     return var_frames
-

@@ -3,15 +3,16 @@ _target_: trainers.unet_trainer.UNetTrainer
 hyperparameters:
   skip_training: false
   max_epochs: 10
-  val_every: 1_000
-  sample_every: 1_000
+  val_every: 500
+  sample_every: 10
+  save_every: 10
   pretrain_image_steps: 0
   batch_size: 4
-  use_ema: false
   save_dir: checkpoints
   save_name: lets_go_beast
   load_path: null  # The path to checkpoint to load from
   lr: 0.0001
+  sample_steps: 250
 
 dataloader:
   _target_: data.climate_dataset.ClimateDataLoader
@@ -32,5 +33,5 @@ optimizer:
 accelerator:
   mixed_precision: fp16
   split_batches: False
-  gradient_accumulation_steps: 8
+  gradient_accumulation_steps: 4
   log_with: wandb
