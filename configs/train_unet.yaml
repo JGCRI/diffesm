@@ -6,18 +6,14 @@ defaults:
   - trainer: unet3d
   - paths: default
 
-accelerator:
-  _target_: accelerate.Accelerator
-  mixed_precision: fp16
-  split_batches: False
-  gradient_accumulation_steps: 1
-  log_with: wandb
-
 # Seed for random number generators
 seed: 50
 
 wandb:
+  project: diffesm
   project_name: diffesm
+  job_type: train
+  name: null
   init_kwargs:
     name: test
     mode: online

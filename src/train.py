@@ -4,19 +4,19 @@ from hydra.utils import instantiate
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from accelerate.logging import get_logger
-from diffusers import UNet3DConditionModel, DDPMScheduler
+from diffusers import DDPMScheduler
 from imagen_pytorch import Unet3D
 
 from data.climate_dataset import ClimateDataset
 from trainers.unet_trainer import UNetTrainer
 
 
-@hydra.main(
-    version_base=None, config_path="../configs", config_name="train_unet.yaml"
-)
+@hydra.main(version_base=None, config_path="../configs", config_name="train_unet.yaml")
 def main(cfg: DictConfig) -> None:
     # Create accelerator object and set RNG seed
-    accelerator: Accelerator = instantiate(cfg.accelerator)
+    accelerator = Accelerator(
+        **cfg.trainer.accelerator
+    )
     set_seed(cfg.seed)
 
     # Logger works with distributed processes
@@ -27,6 +27,7 @@ def main(cfg: DictConfig) -> None:
     train_cfg = dict(cfg.data.shared) | dict(cfg.data.train)
     val_cfg = dict(cfg.data.shared) | dict(cfg.data.val)
 
+    
     # Avoid race conditions when loading data
     with accelerator.main_process_first():
         train_set: ClimateDataset = instantiate(train_cfg, _recursive_=False)

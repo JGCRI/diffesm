@@ -3,6 +3,8 @@ shared:
   seq_len: 28
   scenario: rcp85
   data_dir: /research/hutchinson/data/ml_climate/prepared_data/IPSL/
+  vars:
+    - tas
 
 train:
   realizations:

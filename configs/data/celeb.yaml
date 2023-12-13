@@ -1,8 +1,0 @@
-shared:
-  _target_: data.celeba_hq_dataset.CelebAHQ
-
-train:
-  data_dir: ${paths.data_dir}celeba_hq/train
-
-val:
-  data_dir: ${paths.data_dir}celeba_hq/val

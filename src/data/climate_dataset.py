@@ -2,7 +2,7 @@ import os
 import random
 from typing import Any
 
-from tqdm import tqdm
+from omegaconf import OmegaConf
 import torch
 import numpy as np
 import xarray as xr
@@ -68,12 +68,20 @@ def denorm(ds: xr.DataArray) -> xr.DataArray:
 
 class ClimateDataset(Dataset):
     def __init__(
-        self, seq_len: int, realizations: list[str], data_dir: str, scenario: str
+        self,
+        seq_len: int,
+        realizations: list[str],
+        data_dir: str,
+        scenario: str,
+        vars: list[str],
     ):
         self.seq_len = seq_len
         self.realizations = realizations
         self.data_dir = data_dir
         self.scenario = scenario
+
+        # Necessary to convert vars into a Python list
+        self.vars = OmegaConf.to_object(vars)
 
         # Store one dataset (out of memory) as an xarray dataset for metadata
         # Store a different dataset as a torch tensor for speed
@@ -93,7 +101,13 @@ class ClimateDataset(Dataset):
             self.data_dir, self.scenario, realization, "*.nc"
         )
 
+        # Open up the dataset and make sure it's sorted by time
         dataset = xr.open_mfdataset(realization_dir, combine="by_coords").sortby("time")
+      
+        # Only select the variables we are interested in
+        dataset = dataset[self.vars]
+
+        # Apply preprocessing and normalization
         self.xr_data = dataset.map(preprocess).map(normalize)
 
         # Stacks the data variables ('pr', 'tas', ...) into a single dimension
@@ -110,16 +124,15 @@ class ClimateDataset(Dataset):
 
         np_data = tensor.cpu().numpy()
 
-        # data_vars = {
-        #     var_name: (["time", "lat", "lon"], np_data[i])
-        #     for i, var_name in enumerate(self.xr_data.data_vars.keys())
-        # }
-
-        # REMOVE
+        # Convert the numpy array to a dictionary of xr.DataArrays
+        # with the same names as the original dataset
         data_vars = {
-            "tas": (["time", "lat", "lon"], np_data[0]),
+            var_name: (["time", "lat", "lon"], np_data[i])
+            for i, var_name in enumerate(self.xr_data.data_vars.keys())
         }
 
+        # Create the dataset with the same coordinates as the original dataset
+        # Note: The original time values are lost and just start at 0 instead
         ds = xr.Dataset(
             data_vars,
             coords={
@@ -136,7 +149,7 @@ class ClimateDataset(Dataset):
 
     def __getitem__(self, idx: int):
         """Defines how to get a specific index from the dataset"""
-        return self.tensor_data[1:, idx : idx + self.seq_len]
+        return self.tensor_data[:, idx : idx + self.seq_len]
 
 
 class ClimateDataLoader:
@@ -155,13 +168,7 @@ class ClimateDataLoader:
     def __len__(self):
         return self.dataset.estimate_num_batches(self.batch_size)
 
-    def generate(self, desc: str, disable=False) -> torch.Tensor:
-        t = tqdm(
-            total=len(self),
-            desc=desc,
-            disable=not self.accelerator.is_main_process or disable,
-        )
-
+    def generate(self) -> torch.Tensor:
         # Iterate through each realization in our dataset
         random.shuffle(self.dataset.realizations)
 
@@ -178,20 +185,3 @@ class ClimateDataLoader:
 
             for sample in dl:
                 yield sample
-                t.update()
-
-
-if __name__ == "__main__":
-    from tqdm import tqdm
-    from torch.utils.data import DataLoader
-
-    dataset = ClimateDataset(
-        28,
-        ["r1", "r2"],
-        "/research/hutchinson/data/ml_climate/prepared_data/IPSL/",
-        "rcp85",
-    )
-
-    dataloader = climate_dataloader(dataset, batch_size=32, num_workers=0)
-    for thing in dataloader:
-        pass

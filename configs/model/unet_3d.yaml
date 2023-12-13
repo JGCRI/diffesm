@@ -1,20 +1,18 @@
-_target_: imagen_pytorch.Unet3D
-dim: 64
-num_resnet_blocks: 1
-dim_mults:
-  - 1
+_target_: models.video_net.UNetModel3D
+n_vars: 1
+model_dim: 64
+dim_mults: 
+  - 0.75
   - 2
+  - 3
   - 4
-  - 8
-cond_images_channels: 1
-channels: 1
-layer_attns: False
-attend_at_middle: False   
-time_causal_attn: True
-layer_cross_attns: False
-use_linear_attn: False
-use_linear_cross_attn: False
-cond_on_text: False
-memory_efficient: True
-attn_dim_head: 16
-attn_heads: 4
+use_checkpoint: True
+use_sparse_linear_attn: False
+use_temp_attn: False
+year_cond: False
+cond_map: True
+day_cond: False
+attn_dim_head: 32
+attn_heads: 8
+init_kernel_size: 7
+resnet_groups: 8

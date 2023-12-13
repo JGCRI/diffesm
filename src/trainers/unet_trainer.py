@@ -1,12 +1,11 @@
 import os
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import torch
 from accelerate import Accelerator
-from diffusers import SchedulerMixin, DDPMPipeline
+from diffusers import SchedulerMixin
 from imagen_pytorch import Unet3D
 from omegaconf.dictconfig import DictConfig
-from torch import Tensor
 from torch.optim import Optimizer
 from torch.nn.functional import mse_loss
 from torch.utils.data import DataLoader
@@ -14,7 +13,7 @@ from tqdm import tqdm
 from einops import reduce
 import wandb
 
-from utils.viz_utils import create_gif, plot_map
+from utils.viz_utils import create_gif
 from data.climate_dataset import ClimateDataset, ClimateDataLoader
 from trainers.base_trainer import BaseTrainer
 
@@ -42,22 +41,63 @@ class UNetTrainer(BaseTrainer):
         self.model = model
         self.scheduler: SchedulerMixin = scheduler
 
-        # We need separate optimizers for the autoencoder and the discriminator
+        # Assign the device and weight dtype (32 bit for training)
+        self.device = self.accelerator.device
+        self.weight_dtype = torch.float32
+
         self.optimizer = optimizer(self.model.parameters())
 
         self.train_loader: ClimateDataLoader = dataloader(
-            self.train_set, self.accelerator
+            self.train_set,
+            self.accelerator,
+            self.batch_size,
         )
-        self.val_loader: ClimateDataLoader = dataloader(self.val_set, self.accelerator)
+        self.val_loader: ClimateDataLoader = dataloader(
+            self.val_set,
+            self.accelerator,
+            self.batch_size,
+        )
 
         # Initialize counters
         self.global_step = 0
+        self.first_epoch = 0
+
+        # Keep track of important variables for logging
+        self.total_batch_size = (
+            self.batch_size
+            * self.accelerator.num_processes
+            * self.accelerator.gradient_accumulation_steps
+        )
+        self.num_steps_per_epoch = (
+            len(self.train_loader) // self.accelerator.gradient_accumulation_steps
+        )
+        self.max_train_steps = self.max_epochs * self.num_steps_per_epoch
+
+        # Log to WANDB (on main process only)
+        if self.accelerator.is_main_process:
+            self.log_hparams()
 
         # Load model states from checkpoints if they exist
-        self.load()
+        if self.load_path:
+            self.load()
 
         # Prepare everything for GPU training
         self.prepare()
+
+    def log_hparams(self):
+        """Logs the hyperparameters to WANDB."""
+        run = self.accelerator.get_tracker("wandb").tracker
+
+        hparam_dict = {
+            "Number Training Examples": len(self.train_set),
+            "Number Epochs": self.max_epochs,
+            "Batch Size per Device": self.batch_size,
+            "Total Train Batch Size (w. distributed & accumulation)": self.total_batch_size,
+            "Gradient Accumulation Steps": self.accelerator.gradient_accumulation_steps,
+            "Total Optimization Steps": self.max_train_steps,
+        }
+
+        run.config.update(hparam_dict)
 
     def prepare(self):
         """Just send all relevant objects through the accelerator to be placed on GPU."""
@@ -68,38 +108,86 @@ class UNetTrainer(BaseTrainer):
 
     def train(self):
         # Sanity check the validation loop and sampling before training
-        self.validation_loop(sanity_check=True)
-        self.sample()
+        for epoch in range(self.first_epoch, self.max_epochs):
+            self.model.train()
+            progress_bar = tqdm(
+                total=self.num_steps_per_epoch,
+                disable=not self.accelerator.is_local_main_process,
+            )
+            progress_bar.set_description(f"Epoch {epoch}")
 
-        while self.global_step < self.max_steps:
-            # Main Training Loop
-            for batch_idx, batch in enumerate(
-                self.train_loader.generate(desc="Training")
-            ):
-                self.model.train()
-                # Send the batch through our autoencoder to obtain loss
-                loss, _ = self.model_forward_pass(batch)
+            for step, batch in enumerate(self.train_loader.generate()):
+                # Skip steps until we reach the resumed step
+                if (
+                    self.load_path
+                    and epoch == self.first_epoch
+                    and step < self.resume_step
+                ):
+                    if step % self.accelerator.gradient_accumulation_steps == 0:
+                        progress_bar.update(1)
 
-                # Update the loss metric and take an update step
-                self.global_step += 1
-                self.accelerator.log(
-                    {
-                        "Training/Loss": loss.item(),
-                        "Epoch": self.global_step // len(self.train_loader),
-                    },
-                    step=self.global_step,
-                )
+                loss = self.get_loss(batch)
 
-                # Gradient Update
-                self.optimizer.zero_grad()
-                self.accelerator.backward(loss)
-                self.optimizer.step()
+                # Check if the accelerator has performed an optimization step
+                if self.accelerator.sync_gradients:
+                    # Update counts
+                    progress_bar.update(1)
+                    self.global_step += 1
 
-                # Check to see if we need to validate and sample
-                if self.global_step % self.val_every == 0:
-                    # self.validation_loop()
-                    self.sample()
-                    self.save()
+                    if self.accelerator.is_main_process:
+                        # Check to see if we need to sample from our model
+                        if self.global_step % self.sample_every == 0:
+                            self.sample()
+
+                # Metric calculation and logging
+                log_dict = {"Training/Loss": loss.detach().item()}
+                self.accelerator.log(log_dict, step=self.global_step)
+                progress_bar.set_postfix(**log_dict)
+
+            progress_bar.close()
+
+    def get_loss(self, batch):
+        clean_samples = batch.to(self.weight_dtype)
+        cond_map = reduce(clean_samples, "b v t h w -> b v 1 h w", "mean").repeat(1, 1, clean_samples.shape[-3], 1, 1)
+
+        # Sample noise that we'll add to the clean images
+        noise = torch.randn_like(clean_samples)
+        timesteps = torch.randint(
+            0, len(self.scheduler), (clean_samples.shape[0],), device=self.device
+        ).long()
+
+        # Add noise to the clean images according to the noise magnitude at each timestep
+        # (this is the forward diffusion process)
+        noisy_samples = self.scheduler.add_noise(clean_samples, noise, timesteps)
+
+        with self.accelerator.accumulate(self.model):
+            # Start by pretraining without temporal attention
+            ignore_time = (
+                True if self.global_step < self.pretrain_image_steps else False
+            )
+            model_output = self.model(
+                noisy_samples,
+                timesteps,
+                cond_map=cond_map,
+            )
+
+            # Make sure to get the right target for the loss
+            if self.scheduler.config.prediction_type == "epsilon":
+                target = noise
+            elif self.scheduler.config.prediction_type == "v_prediction":
+                target = self.scheduler.get_velocity(clean_samples, noise, timesteps)
+            else:
+                raise NotImplementedError("Only epsilon and v_prediction supported")
+
+                # Calculate loss and update gradients
+            loss = mse_loss(model_output.float(), target.float())
+            self.accelerator.backward(loss)
+
+            if self.accelerator.sync_gradients:
+                self.accelerator.clip_grad_norm_(self.model.parameters(), 1.0)
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+        return loss
 
     @torch.inference_mode()
     def validation_loop(self, sanity_check=False) -> None:
@@ -110,7 +198,7 @@ class UNetTrainer(BaseTrainer):
         self.model.eval()
         val_loss = 0
 
-        for batch_idx, batch in enumerate(self.val_loader.generate(desc=f"Validating")):
+        for batch_idx, batch in enumerate(self.val_loader.generate()):
             # If we are sanity checking, only run 10 batches
             if sanity_check and batch_idx > 10:
                 return
@@ -127,21 +215,20 @@ class UNetTrainer(BaseTrainer):
         """Samples a batch of images from the model."""
 
         # Grab a random sample from validation set
-        val_sample = next(
-            iter(self.val_loader.generate(desc="Sampling", disable=True))
-        )[0].unsqueeze(0)
+        batch = next(iter(self.val_loader.generate()))[0:1]
 
-        cond_map = reduce(val_sample, "b v t h w -> b v h w", "mean")
+        clean_samples = batch.to(self.weight_dtype)
+        cond_map = reduce(clean_samples, "b v t h w -> b v 1 h w", "mean").repeat(1, 1, clean_samples.shape[-3], 1, 1)
 
-        gen_sample = torch.randn_like(val_sample)
+        # Sample noise that we'll add to the clean images
+        gen_sample = torch.randn_like(clean_samples)
 
         for i in tqdm(range(len(self.scheduler) - 1, -1, -1), "Sampling"):
-            timestep = torch.tensor([i] * val_sample.shape[0], device=val_sample.device)
+            timestep = torch.tensor([i] * gen_sample.shape[0], device=self.device)
             output = self.model(
                 gen_sample,
                 timestep,
-                cond_images=cond_map,
-                ignore_time=True if self.global_step < self.warm_up else False,
+                cond_map=cond_map,
             )
 
             gen_sample = self.scheduler.step(
@@ -150,7 +237,7 @@ class UNetTrainer(BaseTrainer):
 
         # Turn the samples into xr datasets
         gen_ds = self.val_set.convert_tensor_to_xarray(gen_sample[0])
-        val_ds = self.val_set.convert_tensor_to_xarray(val_sample[0])
+        val_ds = self.val_set.convert_tensor_to_xarray(clean_samples[0])
 
         # Create a gif of the samples
         gen_frames = create_gif(gen_ds)
@@ -166,42 +253,6 @@ class UNetTrainer(BaseTrainer):
             self.accelerator.log(
                 {f"Original {var}": wandb.Video(gif, fps=4)}, step=self.global_step
             )
-
-    def model_forward_pass(
-        self, batch: Tensor, timesteps: Optional[int] = None
-    ) -> tuple[Tensor, Tensor]:
-        # Batch is of shape (batch_size, n_vars, seq_len, n_lat, n_lon)
-        # Average the batch along time and repeat it to match the shape of the batch
-        cond_map = reduce(batch, "b v t h w -> b v h w", "mean")
-
-        # Noise the input batch
-        noise = torch.randn_like(batch)
-        timesteps = (
-            torch.randint(
-                0, len(self.scheduler), (batch.shape[0],), device=batch.device
-            )
-            if timesteps is None
-            else timesteps
-        )
-
-        noisy_samples = self.scheduler.add_noise(
-            batch, noise=noise, timesteps=timesteps
-        )
-
-        # Concatenate the noise and the condition map
-        # noisy_samples = torch.cat([noisy_samples, cond_map], dim=1)
-
-        # Pass the noisy samples through the model
-        model_output = self.model(
-            noisy_samples,
-            timesteps,
-            cond_images=cond_map,
-            ignore_time=True if self.global_step < self.warm_up else False,
-        )
-
-        loss = mse_loss(model_output, noise)
-
-        return loss, model_output
 
     def save(self):
         """Saves the state of training to disk."""
@@ -228,21 +279,25 @@ class UNetTrainer(BaseTrainer):
             self.accelerator.save(state_dict, os.path.join(self.save_dir, save_name))
 
     def load(self):
-        """Loads the state of trainin from a checkpoint."""
-        if self.load_name is None:
-            return
-        else:
-            # Add an extension if one doesn't exist
-            load_name = (
-                self.load_name if "." in self.load_name else self.load_name + ".pt"
-            )
-            state_dict = torch.load(
-                os.path.join(self.load_dir, load_name), map_location="cpu"
-            )
+        """Loads the state of training from a checkpoint."""
 
-            # Load trainer variables
-            self.global_step = state_dict["Global Step"]
+        # Make sure to map all tensors to the CPU for consistency
+        checkpoint = torch.load(
+            os.path.join(self.load_dir, self.load_path), map_location="cpu"
+        )
 
-            # Load the state dict for models and optimizers
-            self.model.load_state_dict(state_dict["Unet"])
-            self.optimizer.load_state_dict(state_dict["Optimizer"])
+        # Load trainer variables
+        self.global_step = checkpoint["Global Step"]
+
+        # Update counts related to progress in training
+        self.resume_global_step = (
+            self.global_step * self.accelerator.gradient_accumulation_steps
+        )
+        self.first_epoch = self.global_step // self.num_steps_per_epoch
+        self.resume_step = self.resume_global_step % (
+            self.num_steps_per_epoch * self.accelerator.gradient_accumulation_steps
+        )
+
+        # Load the state dict for models and optimizers
+        self.model.load_state_dict(checkpoint["Unet"])
+        self.optimizer.load_state_dict(checkpoint["Optimizer"])
