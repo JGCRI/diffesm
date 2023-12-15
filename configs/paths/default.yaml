@@ -2,5 +2,8 @@
 # Defaults to current working directory
 root_dir: .
 
-# path to data directory
-data_dir: ${paths.root_dir}/data/
+# Path to directory where raw netCDF4 files are stored
+data_dir: /research/hutchinson/data/ml_climate/prepared_data/
+
+# Path to where our generated samples will be saved
+save_dir: /research/hutchinson/data/ml_climate/saved_samples/

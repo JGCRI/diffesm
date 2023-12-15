@@ -16,9 +16,11 @@ dependencies:
   - hydra-core
   - wandb
   - ipykernel
+  - ipywidgets
   - netcdf4
   - dask
   - matplotlib
+  - nc-time-axis
   - cartopy
   - moviepy
   - imageio

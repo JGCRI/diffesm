@@ -17,6 +17,7 @@ from utils.viz_utils import create_gif
 from data.climate_dataset import ClimateDataset, ClimateDataLoader
 from trainers.base_trainer import BaseTrainer
 from models.video_net import UNetModel3D
+from utils.gen_utils import generate_samples
 
 
 class UNetTrainer(BaseTrainer):
@@ -234,30 +235,9 @@ class UNetTrainer(BaseTrainer):
         batch = next(iter(self.val_loader.generate()))[0:1]
 
         clean_samples = batch.to(self.weight_dtype)
-        cond_map = reduce(clean_samples, "b v t h w -> b v 1 h w", "mean").repeat(
-            1, 1, clean_samples.shape[-3], 1, 1
-        )
-
-        # Sample noise that we'll add to the clean images
-        gen_sample = torch.randn_like(clean_samples)
-
-        # Run the diffusion process in reverse
-        for i in tqdm(
-            range(
-                len(self.scheduler) - 1, -1, -len(self.scheduler) // self.sample_steps
-            ),
-            "Sampling",
-        ):
-            timestep = torch.tensor([i] * gen_sample.shape[0], device=self.device)
-            output = self.ema_model(
-                gen_sample,
-                timestep,
-                cond_map=cond_map,
-            )
-
-            gen_sample = self.scheduler.step(
-                output, timestep=i, sample=gen_sample
-            ).prev_sample
+        
+        # Generate the samples
+        gen_sample = generate_samples(clean_samples, self.scheduler, self.sample_steps, self.ema_model)
 
         # Turn the samples into xr datasets
         gen_ds = self.val_set.convert_tensor_to_xarray(gen_sample[0])

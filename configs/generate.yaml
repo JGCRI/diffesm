@@ -1,0 +1,26 @@
+defaults:
+  - _self_
+  - model: unet_3d
+  - scheduler: ddpm
+  - paths: default
+
+# Seed for random number generators
+seed: 50
+
+load_path: checkpoints/lets_go_beast.pt
+esm: IPSL
+scenario: rcp85
+gen_mode: gen  # Either gen/val/test
+batch_size: 8
+sample_steps: 100
+start_year: 2080
+end_year: 2100
+variable: tas   # Only works with a single variable, for now
+save_name: null  # Only set a save name if you want something special added to your save path
+
+dataset:
+  _target_: data.climate_dataset.ClimateDataset
+  seq_len: 28
+
+accelerator:
+  mixed_precision: fp16

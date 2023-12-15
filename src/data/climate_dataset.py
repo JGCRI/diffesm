@@ -1,6 +1,6 @@
 import os
 import random
-from typing import Any
+from typing import Any, Optional
 
 from omegaconf import OmegaConf
 import torch
@@ -71,17 +71,18 @@ class ClimateDataset(Dataset):
         self,
         seq_len: int,
         realizations: list[str],
+        esm: str,
         data_dir: str,
         scenario: str,
         vars: list[str],
     ):
         self.seq_len = seq_len
         self.realizations = realizations
-        self.data_dir = data_dir
-        self.scenario = scenario
+
+        self.data_dir = os.path.join(data_dir, esm, scenario)
 
         # Necessary to convert vars into a Python list
-        self.vars = OmegaConf.to_object(vars)
+        self.vars = OmegaConf.to_object(vars) if not isinstance(vars, list) else vars
 
         # Store one dataset (out of memory) as an xarray dataset for metadata
         # Store a different dataset as a torch tensor for speed
@@ -98,26 +99,33 @@ class ClimateDataset(Dataset):
     def load_data(self, realization: str):
         """Loads the data from the specified paths and returns it as an xarray Dataset."""
         realization_dir = os.path.join(
-            self.data_dir, self.scenario, realization, "*.nc"
+            self.data_dir, realization, "*.nc"
         )
 
         # Open up the dataset and make sure it's sorted by time
         dataset = xr.open_mfdataset(realization_dir, combine="by_coords").sortby("time")
-      
+
         # Only select the variables we are interested in
         dataset = dataset[self.vars]
 
         # Apply preprocessing and normalization
         self.xr_data = dataset.map(preprocess).map(normalize)
+        self.tensor_data = self.convert_xarray_to_tensor(self.xr_data)
+
+    def convert_xarray_to_tensor(self, ds: xr.Dataset) -> torch.Tensor:
+        """Generate a tensor of data from an xarray dataset"""
 
         # Stacks the data variables ('pr', 'tas', ...) into a single dimension
-        stacked_ds = self.xr_data.to_stacked_array(
+        stacked_ds = ds.to_stacked_array(
             new_dim="var", sample_dims=["time", "lon", "lat"]
         ).transpose("var", "time", "lat", "lon")
+ 
+        # Convert the numpy array to a torch tensor
+        tensor_data = torch.tensor(stacked_ds.to_numpy(), dtype=torch.float32)
 
-        self.tensor_data = torch.tensor(stacked_ds.to_numpy(), dtype=torch.float32)
+        return tensor_data
 
-    def convert_tensor_to_xarray(self, tensor: torch.Tensor) -> xr.Dataset:
+    def convert_tensor_to_xarray(self, tensor: torch.Tensor, time_coords : xr.DataArray = None) -> xr.Dataset:
         """Generate an xarray dataset from a tensor of data"""
 
         assert len(tensor.shape) == 4, "Tensor must have shape (var, time, lat, lon)"
@@ -142,6 +150,9 @@ class ClimateDataset(Dataset):
             },
         ).map(denorm)
 
+        # If we are provided time coords, create a new time coordinate
+        if time_coords is not None:
+            ds = ds.assign_coords(time=time_coords)
         return ds
 
     def __len__(self):
