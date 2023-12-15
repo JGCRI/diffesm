@@ -1,0 +1,12 @@
+defaults:
+  - _self_
+  - paths: default
+
+var: tas
+esm: IPSL
+quantile: 0.9
+
+dataset:
+  _target_: data.climate_dataset.ClimateDataset
+  seq_len: 28
+  

@@ -1,6 +1,4 @@
 {"load_dir" : "data/ml_climate/IPSL/ESGF",
-"save_dir" : "data/ml_climate/prepared_data/IPSL",
-"scenario" : "rcp85",
     "realizations" : {
 
     "r1" : {

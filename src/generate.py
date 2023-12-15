@@ -57,7 +57,8 @@ def create_batches(
         tensor_data = dataset.convert_xarray_to_tensor(batch)
 
         # Append the batch to the list of batches
-        data.append((tensor_data, batch.time))
+        data.append((tensor_data, dict(batch.coords)))
+
 
     return data
 
@@ -73,15 +74,15 @@ def custom_collate_fn(
         and the corresponding time coordinates
 
     Returns:
-        tuple[Tensor, list[xr.DataArray]]: A tuple containing the stacked tensor batch and a list of time coordinates
+        tuple[Tensor, list[xr.DataArray]]: A tuple containing the stacked tensor batch and a list of coordinates
     """
     tensor_batch = []
-    time_coords = []
+    coords = []
     for batch in batches:
         tensor_batch.append(batch[0])
-        time_coords.append(batch[1])
-
-    return torch.stack(tensor_batch), time_coords
+        coords.append(batch[1])
+    
+    return torch.stack(tensor_batch), coords
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="generate")
@@ -133,7 +134,7 @@ def main(config: DictConfig) -> None:
 
     gen_samples = []
 
-    for tensor_batch, time_coords in tqdm(
+    for tensor_batch, coords in tqdm(
         dataloader, disable=not accelerator.is_main_process
     ):
         if model is not None:
@@ -150,12 +151,12 @@ def main(config: DictConfig) -> None:
         for i in range(len(gen_months)):
             gen_samples.append(
                 dataset.convert_tensor_to_xarray(
-                    gen_months[i], time_coords=time_coords[i]
+                    gen_months[i], coords=coords[i]
                 )
             )
 
     gen_samples = accelerator.gather_for_metrics(gen_samples)
-    gen_samples = xr.concat(gen_samples, "time").drop_vars("height")
+    gen_samples = xr.concat(gen_samples, "time").drop_vars("height").sortby("time")
 
     
     if accelerator.is_main_process:

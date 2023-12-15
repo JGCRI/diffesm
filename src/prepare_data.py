@@ -1,6 +1,7 @@
-import argparse
+import hydra
 import json
 import os
+from omegaconf import DictConfig
 
 import xarray as xr
 from typing_extensions import TypedDict
@@ -17,15 +18,11 @@ class DATA_DICT(TypedDict):
     realizations: dict[str, dict[str, list[str]]]
 
 
-# Cut off all data not included in this range
-START_DATE = 1850
-END_DATE = 2100
-
 # How many chunks to split the data into - this will create NUM_CHUNKS separate files to hold the dat
 NUM_CHUNKS = 40
 
 
-def save_dataset(dataset: xr.Dataset, realization: str, save_dir: str):
+def save_dataset(dataset: xr.Dataset, realization: str, save_dir: str, num_chunks):
     """Saves the dataset in chunks to many netCDF4 files for parallel loading later."""
 
     # Create the save directory if it doesn't already exist
@@ -38,18 +35,18 @@ def save_dataset(dataset: xr.Dataset, realization: str, save_dir: str):
 
     # Determine the number of chunks based on the length of the 'time' dimension
     total_time_points = len(dataset["time"])
-    chunk_size = total_time_points // NUM_CHUNKS
+    chunk_size = total_time_points // num_chunks
 
     split_datasets = []
     paths = []
     # 1. Split the dataset into chunks
-    for idx in range(NUM_CHUNKS):
+    for idx in range(num_chunks):
         # 1. Determine the start and end indices for the chunk
         start_idx = idx * chunk_size
         end_idx = start_idx + chunk_size
 
         # Make sure we cover the remainder if we're on the last chunk
-        if idx == NUM_CHUNKS - 1:
+        if idx == num_chunks - 1:
             end_idx = None
 
         # Slice that chunk from the dataset
@@ -61,7 +58,7 @@ def save_dataset(dataset: xr.Dataset, realization: str, save_dir: str):
     xr.save_mfdataset(split_datasets, paths, compute=True)
 
 
-def process_dataset(dataset: xr.Dataset) -> xr.Dataset:
+def process_dataset(dataset: xr.Dataset, start_year: int, end_year: int) -> xr.Dataset:
     """Does any pre-processing of the dataset necessary before we save it to chunks.
 
     Args:
@@ -71,10 +68,10 @@ def process_dataset(dataset: xr.Dataset) -> xr.Dataset:
         xr.Dataset: Our processed data
     """
 
-    dataset = dataset.drop_vars(['time_bnds', 'lat_bnds', 'lon_bnds'], errors='ignore')
+    dataset = dataset.drop_vars(["time_bnds", "lat_bnds", "lon_bnds"], errors="ignore")
 
     # Drop all the time indices that are greater than 2100
-    dataset = dataset.sel(time=slice(f"{START_DATE}-01-01", f"{END_DATE}-12-31"))
+    dataset = dataset.sel(time=slice(f"{start_year}-01-01", f"{end_year}-12-31"))
 
     return dataset
 
@@ -88,24 +85,31 @@ def collect_var_data(path_list: list[str], base_dir: str) -> xr.Dataset:
     return xr.concat(all_data, dim="time").sortby("time")
 
 
-def main(filename: str, cluster=False):
+@hydra.main(version_base=None, config_path="../configs", config_name="prepare_data")
+def main(cfg: DictConfig):
     """Goes through each realization in the JSON file and saves the data to chunks.
 
     Args:
         filename (str): Path to our JSON file
         cluster (bool, optional): Whether we are on the cluster or not. Defaults to False.
     """
+    json_path = os.path.join(
+        cfg.paths.json_data_dir, cfg.esm, cfg.scenario, "data.json"
+    )
     # Open a json file
-    with open(filename) as f:
+    with open(json_path) as f:
         data: DATA_DICT = json.load(f)
 
     # Construct the paths to the load and save directories
-    load_dir = os.path.join(CLUSTER_PATH if cluster else COW_PATH, data["load_dir"])
+    load_dir = data["load_dir"]
     save_dir = os.path.join(
-        CLUSTER_PATH if cluster else COW_PATH,
-        data["save_dir"],
-        data["scenario"],
+        cfg.paths.data_dir,
+        cfg.esm,
+        cfg.scenario,
     )
+
+    start_year = data["start_year"]
+    end_year = data["end_year"]
 
     # Iterate through each realization in our JSON file
     for realization, realization_data in data["realizations"].items():
@@ -117,22 +121,11 @@ def main(filename: str, cluster=False):
             ]
         )
 
-        dataset = process_dataset(dataset)
+        dataset = process_dataset(dataset, start_year, end_year)
         print(f"Finished processing realization {realization}")
-        save_dataset(dataset, realization, save_dir)
+        save_dataset(dataset, realization, save_dir, cfg.num_chunks)
         print(f"Finished saving realization {realization}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process a JSON file.")
-    parser.add_argument("filename", type=str, help="Path to the JSON file")
-
-    parser.add_argument(
-        "--cluster",
-        action="store_true",
-        help="Flag indicating if we are running on the cluster",
-    )
-
-    args = parser.parse_args()
-
-    main(args.filename, args.cluster)
+    main()

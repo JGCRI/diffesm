@@ -5,5 +5,12 @@ root_dir: .
 # Path to directory where raw netCDF4 files are stored
 data_dir: /research/hutchinson/data/ml_climate/prepared_data/
 
+# Path to where the JSON files describing the data are stored
+json_data_dir: /research/hutchinson/data/ml_climate/data_json/
+
 # Path to where our generated samples will be saved
 save_dir: /research/hutchinson/data/ml_climate/saved_samples/
+
+# Path to where our quantiles will be saved to and accessed
+quantile_dir: /research/hutchinson/data/ml_climate/saved_quantiles/
+

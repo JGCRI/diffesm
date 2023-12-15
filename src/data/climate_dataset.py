@@ -125,7 +125,7 @@ class ClimateDataset(Dataset):
 
         return tensor_data
 
-    def convert_tensor_to_xarray(self, tensor: torch.Tensor, time_coords : xr.DataArray = None) -> xr.Dataset:
+    def convert_tensor_to_xarray(self, tensor: torch.Tensor, coords : xr.DataArray = None) -> xr.Dataset:
         """Generate an xarray dataset from a tensor of data"""
 
         assert len(tensor.shape) == 4, "Tensor must have shape (var, time, lat, lon)"
@@ -151,8 +151,8 @@ class ClimateDataset(Dataset):
         ).map(denorm)
 
         # If we are provided time coords, create a new time coordinate
-        if time_coords is not None:
-            ds = ds.assign_coords(time=time_coords)
+        if coords is not None:
+            ds = ds.assign_coords(coords)
         return ds
 
     def __len__(self):
