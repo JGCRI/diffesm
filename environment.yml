@@ -30,3 +30,4 @@ dependencies:
   - pip:
     - imagen_pytorch
     - einops_exts
+    - ema_pytorch

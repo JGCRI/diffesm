@@ -1,7 +1,7 @@
 _target_: models.video_net.UNetModel3D
 n_vars: 1
 model_dim: 64
-dim_mults: 
+dim_mults:
   - 0.75
   - 2
   - 3
