@@ -28,108 +28,53 @@ Using diffusion to approximate Earth System Model (ESM) in the temperature and p
    e. After activating the environment, you can proceed with the rest of the setup.
 
 ## Preparing the Data
-Due to the necessity of large datasets for training diffusion model, we run a pre-processing script to chunk the dataset for multi-process loading and save it to disk. This is done through the following commands:
+To train the diffusion model, we first have to preprocess the data into a format that the training script is expecting. Follow these steps to preprocess and organize your data:
 
-1. Gather all of the data into a single directory. They should all be stored in .nc format. 
+### Step 1: Consolidate Dataset
+Collect all data files into a single directory. Ensure each file is in `.nc` format.
 
-2. Prepare a JSON file describing the structure of your dataset and the variables that comprise it. See below for an example JSON:
+### Step 2: Create Dataset Description
+Develop a JSON file to describe your dataset's structure and its variables. This file should outline at least three realizations for each of the training, validation, and testing sets. 
 
+Example JSON structure:
 ```json
 {
    "load_dir" : "/path/to/data_directory/",
     "realizations" : {
-
-    "r1" : {
-    "pr" : [
-        "pr_day_IPSL-CM5A-LR_historical_r1i1p1_18500101-19491231.nc",
-        "pr_day_IPSL-CM5A-LR_historical_r1i1p1_19500101-20051231.nc",
-        "pr_day_IPSL-CM5A-LR_rcp85_r1i1p1_20060101-22051231.nc"
-    ],
-    "tas" : [
-        "tas_day_IPSL-CM5A-LR_historical_r1i1p1_18500101-19491231.nc",
-        "tas_day_IPSL-CM5A-LR_historical_r1i1p1_19500101-20051231.nc",
-        "tas_day_IPSL-CM5A-LR_rcp85_r1i1p1_20060101-22051231.nc"
-    ]
-},
-"r2" : {
-    "pr" : [
-        "pr_day_IPSL-CM5A-LR_historical_r2i1p1_18500101-18991231.nc",
-        "pr_day_IPSL-CM5A-LR_historical_r2i1p1_19000101-19491231.nc",
-        "pr_day_IPSL-CM5A-LR_historical_r2i1p1_19500101-19991231.nc",
-        "pr_day_IPSL-CM5A-LR_historical_r2i1p1_20000101-20051231.nc",
-        "pr_day_IPSL-CM5A-LR_rcp85_r2i1p1_20060101-21001231.nc"
-    ],
-    "tas" : [
-        "tas_day_IPSL-CM5A-LR_historical_r2i1p1_18500101-18991231.nc",
-        "tas_day_IPSL-CM5A-LR_historical_r2i1p1_19000101-19491231.nc",
-        "tas_day_IPSL-CM5A-LR_historical_r2i1p1_19500101-19991231.nc",
-        "tas_day_IPSL-CM5A-LR_historical_r2i1p1_20000101-20051231.nc",
-        "tas_day_IPSL-CM5A-LR_rcp85_r2i1p1_20060101-21001231.nc"
-    ]
-},
-"r3" : {
-    "pr" : [
-        "pr_day_IPSL-CM5A-LR_historical_r3i1p1_18500101-19491231.nc",
-        "pr_day_IPSL-CM5A-LR_historical_r3i1p1_19500101-20051231.nc",
-        "pr_day_IPSL-CM5A-LR_rcp85_r3i1p1_20060101-21001231.nc"
-    ],
-    "tas" : [
-        "tas_day_IPSL-CM5A-LR_historical_r3i1p1_18500101-19491231.nc",
-        "tas_day_IPSL-CM5A-LR_historical_r3i1p1_19500101-20051231.nc",
-        "tas_day_IPSL-CM5A-LR_rcp85_r3i1p1_20060101-21001231.nc"
-    ]
-},
-"r4" : {
-    "pr" : [
-        "pr_day_IPSL-CM5A-LR_historical_r4i1p1_18500101-18991231.nc",
-        "pr_day_IPSL-CM5A-LR_historical_r4i1p1_19000101-19491231.nc",
-        "pr_day_IPSL-CM5A-LR_historical_r4i1p1_19500101-19991231.nc",
-        "pr_day_IPSL-CM5A-LR_historical_r4i1p1_20000101-20051231.nc",
-        "pr_day_IPSL-CM5A-LR_rcp85_r4i1p1_20060101-21001231.nc"
-    ],
-    "tas" : [
-        "tas_day_IPSL-CM5A-LR_historical_r4i1p1_18500101-18991231.nc",
-        "tas_day_IPSL-CM5A-LR_historical_r4i1p1_19000101-19491231.nc",
-        "tas_day_IPSL-CM5A-LR_historical_r4i1p1_19500101-19991231.nc",
-        "tas_day_IPSL-CM5A-LR_historical_r4i1p1_20000101-20051231.nc",
-        "tas_day_IPSL-CM5A-LR_rcp85_r4i1p1_20060101-21001231.nc"
-    ]
-},
-"r5" : {
-    "pr" : [
-        "pr_day_IPSL-CM5A-LR_historical_r5i1p1_18500101-19491231.nc",
-        "pr_day_IPSL-CM5A-LR_historical_r5i1p1_19500101-20051231.nc",
-        "pr_day_IPSL-CM5A-LR_rcp85_r3i1p1_20060101-21001231.nc"
-    ],
-    "tas" : [
-        "tas_day_IPSL-CM5A-LR_historical_r5i1p1_18500101-19491231.nc",
-        "tas_day_IPSL-CM5A-LR_historical_r5i1p1_19500101-20051231.nc",
-        "tas_day_IPSL-CM5A-LR_rcp85_r3i1p1_20060101-21001231.nc"
-    ]
-},
-
-"r6" : {
-    "pr" : [
-        "pr_day_IPSL-CM5A-LR_historical_r6i1p1_18500101-19491231.nc",
-        "pr_day_IPSL-CM5A-LR_historical_r6i1p1_19500101-20051231.nc",
-        "pr_day_IPSL-CM5A-LR_rcp85_r4i1p1_20060101-21001231.nc"
-    ],
-    "tas" : [
-        "tas_day_IPSL-CM5A-LR_historical_r6i1p1_18500101-19491231.nc",
-        "tas_day_IPSL-CM5A-LR_historical_r6i1p1_19500101-20051231.nc",
-        "tas_day_IPSL-CM5A-LR_rcp85_r4i1p1_20060101-21001231.nc"
-    ]
-   }
-}
+        // Example of realizations for precipitation (pr) and temperature (tas)
+        // under different scenarios and time frames
+        "r1" : {
+            "pr" : ["file1_1850_1950.nc", "file2_1950_2100.nc", ...],
+            "tas" : ["file3_1850_2006.nc", "file4_2006_2100.nc", ...]
+        },
+        "r2" : {...},
+        "r3" : {...}
+    }
 }
 ```
+### Step 3: Save JSON file
+Store the JSON file in a structured directory format:
+`/{path_to_directory}/{ESM_name}/{scenario_name}/data.json`
 
-3. Save the JSON file to a directory. The directory should be in the form of: `/{leading path to directory}/{name of ESM (IPSL)}/{name of scenario (rcp85)}/data.json`
+### Step 4: Update Configuration Paths
+Modify `configs/paths/default.yaml` (or an alternative configuration file in the paths directory) to include:
 
-4. In `configs/paths/default.yaml` (or other config file in the `paths` directory), specify the leading path to all the JSON files under `json_data_dir` and specify the leading path to the directory where you want to save the processed data under `data_dir`.
+- **json_data_dir**: The leading path to the JSON files.
+- **data_dir**: The path to the directory where processed data will be stored.
 
-5. Specify the ESM, Scenario, start and end year of your dataset, and the number of chunks to split it into in `configs/prepare_data.yaml`. Then run `make prepare_data` to process the data. Note, this may take up to an hour with large datasets.
+### Step 5: Run Preprocessing Script
+In `configs/prepare_data.yaml` specify:
+- The Earth System Model (IPSL, CESM, etcm...)
+- Scenario (rcp85, rcp45, etc...)
+- Dataset's start and end years
+- Number of chunks for data splitting
 
+Finally run `make prepare_data` to start processing. Note: This may take up to an hour for large datasets, but will only need to be run once
+
+
+
+## Training the Model
+Once the data has been prepared, you can train a diffusion model
 
 
   
