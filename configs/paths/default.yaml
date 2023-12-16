@@ -2,7 +2,7 @@
 # Defaults to current working directory
 root_dir: .
 
-# Path to directory where raw netCDF4 files are stored
+# Path to directory where processed netCDF4 files are stored
 data_dir: /research/hutchinson/data/ml_climate/prepared_data/
 
 # Path to where the JSON files describing the data are stored
