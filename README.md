@@ -74,7 +74,30 @@ Finally run `make prepare_data` to start processing. Note: This may take up to a
 
 
 ## Training the Model
-Once the data has been prepared, you can train a diffusion model
+
+After your data is ready, follow these steps to train the diffusion model, which aims to approximate the Earth System Model (ESM):
+
+### Configuration Setup
+The `configs` directory contains all necessary configuration files for training. `configs/train.yaml` selects the default configuration for the following options
+
+- **Model Architecture:** Located in `config/model/`. These files defines the structure of the diffusion model.
+- **Scheduler:** Found in `config/scheduler/`. It manages the diffusion scheduler we use and defines the noising and denoising process.
+- **Dataset Configuration:** Specified in `config/data/`. It details what ESM and variables you want to use for your dataset.
+- **Training Hyperparameters:** Located in `config/trainer/`. This file includes settings like batch size, learning rate, and other critical parameters for training.
+
+### Hyperparameter Customization
+Adjust the hyperparameters in the configuration files to suit your specific training requirements.
+
+### Training Script Configuration
+Use the `scripts/train.sh` script to set the number of GPUs for training.
+
+### Start Training
+Once all configurations are set, initiate the training process by running the command:
+```bash
+make train
+```
+
+This will start the model training based on your specified configurations.
 
 
   
