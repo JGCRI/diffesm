@@ -99,5 +99,31 @@ make train
 
 This will start the model training based on your specified configurations.
 
+## Evaluation
+
+The evaluation process involves generating and comparing 20 years of daily data to assess the model's performance. This is done in two main steps:
+
+### Step 1: Generating Validation and Test Sets
+- **Configure Data Generation:** Use the `generate.yaml` file to specify the type of data you want to generate (ESM, scenario, start/end years, and validation/test). This file is crucial for defining the parameters of your data generation process.
+- **Initial Generation:** First, generate the validation and test sets using the original Earth System Model (ESM) data. This step does not involve the trained model but relies on the ESM data to create baseline datasets.
+
+### Step 2: Model-based Data Generation
+- **Run Model Generation:** After creating the baseline datasets, run the same generation process, this time using your trained model. This will allow you to produce data that reflects the model's capabilities.
+- **Saving Generated Data:** The output from this process will be automatically saved to the directory specified as `save_dir` in the "paths" configuration file.
+
+### Executing the Generation Script
+To initiate the data generation process for both steps, execute the following command:
+```bash
+make generate
+```
+
+**Additional Notes:**
+
+- **Process Configuration:** The number of processes used during generation is set in the `scripts/gen_sample.sh`` script.
+- **Time Consideration:** Depending on your hardware setup, the generation process may take several minutes.
+
+
+## Visualization
+
 
   
