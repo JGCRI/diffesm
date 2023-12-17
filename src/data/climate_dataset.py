@@ -1,6 +1,6 @@
 import os
 import random
-from typing import Any, Optional
+from typing import Any
 
 from omegaconf import OmegaConf
 import torch

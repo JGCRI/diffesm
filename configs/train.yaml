@@ -2,7 +2,7 @@ defaults:
   - _self_
   - data: ipsl
   - model: unet_3d
-  - scheduler: ddpm
+  - scheduler: continuousddpm
   - trainer: unet3d
   - paths: default
 

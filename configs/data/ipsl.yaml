@@ -4,7 +4,7 @@ shared:
   scenario: rcp85
   esm: IPSL
   vars:
-    - tas
+    - pr
 
 train:
   realizations:

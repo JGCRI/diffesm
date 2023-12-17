@@ -1,15 +1,12 @@
 _target_: trainers.unet_trainer.UNetTrainer
 
 hyperparameters:
-  skip_training: false
   max_epochs: 10
-  val_every: 500
-  sample_every: 100
-  save_every: 100
-  pretrain_image_steps: 0
+  sample_every: 500
+  save_every: 500
   batch_size: 4
   save_dir: checkpoints
-  save_name: testing_checkpoint
+  save_name: ispl_pr_rcp85.pt
   load_path: null  # The path to checkpoint to load from
   lr: 0.0001
   sample_steps: 250
@@ -26,11 +23,11 @@ dataloader:
 optimizer:
   _target_: torch.optim.Adam
   _partial_: True
-  lr: ${..hyperparameters.lr}
+  betas: [0.9, 0.99]
 
 
 accelerator:
   mixed_precision: fp16
   split_batches: False
-  gradient_accumulation_steps: 4
+  gradient_accumulation_steps: 16
   log_with: wandb

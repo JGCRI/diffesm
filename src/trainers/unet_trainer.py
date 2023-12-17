@@ -18,6 +18,7 @@ from data.climate_dataset import ClimateDataset, ClimateDataLoader
 from trainers.base_trainer import BaseTrainer
 from models.video_net import UNetModel3D
 from utils.gen_utils import generate_samples
+from custom_diffusers.continuous_ddpm import ContinuousDDPM
 
 
 class UNetTrainer(BaseTrainer):
@@ -57,7 +58,7 @@ class UNetTrainer(BaseTrainer):
         self.device = self.accelerator.device
         self.weight_dtype = torch.float32
 
-        self.optimizer = optimizer(self.model.parameters())
+        self.optimizer = optimizer(self.model.parameters(), lr=self.lr * self.accelerator.num_processes)
 
         self.train_loader: ClimateDataLoader = dataloader(
             self.train_set,
@@ -81,7 +82,9 @@ class UNetTrainer(BaseTrainer):
             * self.accelerator.gradient_accumulation_steps
         )
         self.num_steps_per_epoch = (
-            len(self.train_loader) // self.accelerator.gradient_accumulation_steps
+            len(self.train_loader)
+            // self.accelerator.gradient_accumulation_steps
+            // self.accelerator.num_processes
         )
         self.max_train_steps = self.max_epochs * self.num_steps_per_epoch
 
@@ -101,7 +104,8 @@ class UNetTrainer(BaseTrainer):
         run = self.accelerator.get_tracker("wandb").tracker
 
         hparam_dict = {
-            "Number Training Examples": len(self.train_set),
+            "Number Training Examples": len(self.train_set)
+            * len(self.train_set.realizations),
             "Number Epochs": self.max_epochs,
             "Batch Size per Device": self.batch_size,
             "Total Train Batch Size (w. distributed & accumulation)": self.total_batch_size,
@@ -121,7 +125,6 @@ class UNetTrainer(BaseTrainer):
     def train(self):
         # Sanity check the validation loop and sampling before training
         for epoch in range(self.first_epoch, self.max_epochs):
-            
             progress_bar = tqdm(
                 total=self.num_steps_per_epoch,
                 disable=not self.accelerator.is_local_main_process,
@@ -155,11 +158,12 @@ class UNetTrainer(BaseTrainer):
 
                         # Check to see if we need to save our model
                         if self.global_step % self.save_every == 0:
-                            self.save()
+                            self.save(epoch)
 
                 # Metric calculation and logging
                 log_dict = {"Training/Loss": loss.detach().item()}
                 self.accelerator.log(log_dict, step=self.global_step)
+                self.accelerator.log({"Epoch": epoch}, step=self.global_step)
                 progress_bar.set_postfix(**log_dict)
 
             progress_bar.close()
@@ -172,9 +176,20 @@ class UNetTrainer(BaseTrainer):
 
         # Sample noise that we'll add to the clean images
         noise = torch.randn_like(clean_samples)
-        timesteps = torch.randint(
-            0, len(self.scheduler), (clean_samples.shape[0],), device=self.device
-        ).long()
+        
+
+        # If we are doing continuous diffusion, timesteps need to be from 0 - 1
+        if isinstance(self.scheduler, ContinuousDDPM):
+            timesteps = torch.rand(clean_samples.shape[0], device=self.device)
+            timesteps = self.scheduler.log_snr(timesteps)
+        else:
+            timesteps = torch.randint(
+            0,
+            self.scheduler.config.num_train_timesteps,
+            (clean_samples.shape[0],),
+            device=self.device,
+            ).long()
+
 
         # Add noise to the clean images according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
@@ -235,9 +250,11 @@ class UNetTrainer(BaseTrainer):
         batch = next(iter(self.val_loader.generate()))[0:1]
 
         clean_samples = batch.to(self.weight_dtype)
-        
+
         # Generate the samples
-        gen_sample = generate_samples(clean_samples, self.scheduler, self.sample_steps, self.ema_model)
+        gen_sample = generate_samples(
+            clean_samples, self.scheduler, self.sample_steps, self.ema_model
+        )
 
         # Turn the samples into xr datasets
         gen_ds = self.val_set.convert_tensor_to_xarray(gen_sample[0])
@@ -258,7 +275,7 @@ class UNetTrainer(BaseTrainer):
                 {f"Original {var}": wandb.Video(gif, fps=4)}, step=self.global_step
             )
 
-    def save(self):
+    def save(self, epoch: int):
         """Saves the state of training to disk."""
         if self.save_name is None:
             return
@@ -275,8 +292,11 @@ class UNetTrainer(BaseTrainer):
 
             # Add an extension if one doesn't exist
             save_name = (
-                self.save_name if "." in self.save_name else self.save_name + ".pt"
+                self.save_name if "." in self.save_name else self.save_name + "_"
             )
+
+            # Add the epoch number to the end
+            save_name += f"_{epoch}.pt"
 
             # Save the State dictionary to disk
             self.accelerator.save(state_dict, os.path.join(self.save_dir, save_name))

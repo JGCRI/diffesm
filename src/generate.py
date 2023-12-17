@@ -2,13 +2,10 @@
 import os
 from typing import Union
 from collections import OrderedDict
-from multiprocessing import Queue, Value, Lock
-import multiprocessing as mp
 
 # Third party imports
 import torch
 from torch import Tensor
-from torch import nn
 from torch.utils.data import DataLoader
 import hydra
 from omegaconf.omegaconf import DictConfig
