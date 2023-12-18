@@ -63,6 +63,8 @@ class ContinuousDDPM(nn.Module):
         self,
         beta_schedule="linear",
         prediction_type="v_prediction",
+        clip_sample=False,
+        clip_range=(0, 1),
     ):
         super().__init__()
         self.prediction_type = prediction_type
@@ -79,6 +81,9 @@ class ContinuousDDPM(nn.Module):
         # sampling
         self.sample_steps: int = None
         self.timesteps: Sequence[int] = None
+
+        self.clip_sample = clip_sample
+        self.clip_range = clip_range
 
     def q_posterior(self, x_start, x_t, t, *, t_next=None):
         t_next = default(t_next, lambda: (t - 1.0 / self.num_timesteps).clamp(min=0.0))
@@ -137,6 +142,10 @@ class ContinuousDDPM(nn.Module):
 
         # Predict the x0 from the model output
         x_start = self.predict_start_from_v(sample, times, model_output)
+
+        if self.clip_sample:
+            x_start = torch.clamp(x_start, *self.clip_range)
+
         model_mean, model_variance, _ = self.q_posterior(
             x_start, sample, times, t_next=times_next
         )

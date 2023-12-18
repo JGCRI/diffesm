@@ -7,7 +7,7 @@ defaults:
 # Seed for random number generators
 seed: 50
 
-load_path: checkpoints/ispl_pr_rcp85.pt_0.pt
+load_path: checkpoints/ipsl_pr_rcp85_take2_2.pt
 esm: IPSL
 scenario: rcp85
 gen_mode: gen  # Either gen/val/test

@@ -1,2 +1,2 @@
 #!/bin/sh
-accelerate launch --num_processes=1 src/train.py
+accelerate launch --num_processes=4 src/train.py

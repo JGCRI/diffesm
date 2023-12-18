@@ -162,11 +162,12 @@ class UNetTrainer(BaseTrainer):
                         if self.global_step % self.save_every == 0:
                             self.save(epoch)
 
-                # Metric calculation and logging
-                log_dict = {"Training/Loss": loss.detach().item()}
-                self.accelerator.log(log_dict, step=self.global_step)
-                self.accelerator.log({"Epoch": epoch}, step=self.global_step)
-                progress_bar.set_postfix(**log_dict)
+                    # Metric calculation and logging
+                    avg_loss = self.accelerator.gather_for_metrics(loss).mean()
+                    log_dict = {"Training/Loss": avg_loss.detach().item()}
+                    self.accelerator.log(log_dict, step=self.global_step)
+                    self.accelerator.log({"Epoch": epoch}, step=self.global_step)
+                    progress_bar.set_postfix(**log_dict)
 
             progress_bar.close()
 
@@ -290,13 +291,8 @@ class UNetTrainer(BaseTrainer):
             # If the directory doesn't exist already create it
             os.makedirs(self.save_dir, exist_ok=True)
 
-            # Add an extension if one doesn't exist
-            save_name = (
-                self.save_name if "." in self.save_name else self.save_name + "_"
-            )
-
-            # Add the epoch number to the end
-            save_name += f"_{epoch}.pt"
+            # Create the save filename and add the epoch number
+            save_name = self.save_name.split(".pt")[0] + f"_{epoch}.pt"
 
             # Save the State dictionary to disk
             self.accelerator.save(state_dict, os.path.join(self.save_dir, save_name))
@@ -305,9 +301,7 @@ class UNetTrainer(BaseTrainer):
         """Loads the state of training from a checkpoint."""
 
         # Make sure to map all tensors to the CPU for consistency
-        checkpoint = torch.load(
-            os.path.join(self.load_dir, self.load_path), map_location="cpu"
-        )
+        checkpoint = torch.load(self.load_path, map_location="cpu")
 
         # Load trainer variables
         self.global_step = checkpoint["Global Step"]
@@ -324,3 +318,4 @@ class UNetTrainer(BaseTrainer):
         # Load the state dict for models and optimizers
         self.model.load_state_dict(checkpoint["Unet"])
         self.optimizer.load_state_dict(checkpoint["Optimizer"])
+        self.ema = checkpoint["EMA"].to(self.device)

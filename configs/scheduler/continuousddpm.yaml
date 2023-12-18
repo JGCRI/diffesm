@@ -1,3 +1,7 @@
 _target_: custom_diffusers.continuous_ddpm.ContinuousDDPM
 beta_schedule: linear
 prediction_type: v_prediction
+clip_sample: true
+clip_range:
+  - 0
+  - null
