@@ -6,7 +6,7 @@ hyperparameters:
   save_every: 500
   batch_size: 4
   save_dir: checkpoints
-  save_name: ispl_pr_rcp85.pt
+  save_name: ipsl_pr_rcp85.pt
   load_path: null  # The path to checkpoint to load from
   lr: 0.0001
   sample_steps: 250
