@@ -1,6 +1,5 @@
 from functools import partial
 from typing import Sequence
-import torch.nn.functional as F
 from torch.special import expm1
 from torch import nn
 import torch

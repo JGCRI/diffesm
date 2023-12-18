@@ -3,7 +3,6 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-from einops_exts.torch import EinopsToAndFrom
 from einops_exts import rearrange_many
 from einops import rearrange
 from rotary_embedding_torch import RotaryEmbedding
@@ -20,11 +19,11 @@ def checkpoint(fn, *args, enabled=False):
 
 # Convert value to an n-element tuple of value
 def cast_to_tuple(val, n):
-    if type(val) == tuple:
+    if isinstance(val, tuple):
         return val
-    elif type(val) == list:
+    elif isinstance(val, list):
         return tuple(val)
-    elif type(val) == int or type(val) == bool:
+    elif isinstance(val, int) or isinstance(val, bool):
         return [val] * n
     else:
         return tuple(val)
@@ -609,23 +608,23 @@ class UNetModel3D(nn.Module):
             rotary_emb = RotaryEmbedding(32)
 
             # Create temporal attention operation only just frames
-            temporal_op = lambda dim: EinopsToAndFrom(
-                "b c f h w",
-                "b (h w) f c",
-                Attention(
-                    dim,
-                    heads=attn_heads,
-                    dim_head=attn_dim_head,
-                    rotary_emb=rotary_emb,
-                    use_checkpoint=use_checkpoint,
-                ),
-            )
+            def temporal_op(dim):
+                return EinopsToAndFrom(
+                    "b c f h w",
+                    "b (h w) f c",
+                    Attention(
+                        dim,
+                        heads=attn_heads,
+                        dim_head=attn_dim_head,
+                        rotary_emb=rotary_emb,
+                        use_checkpoint=use_checkpoint,
+                    ),
+                )
 
         else:
             # Otherwise use temporal convolutions only
-            temporal_op = lambda dim: TemporalCNN(
-                dim, kernel_size=3, use_checkpoint=use_checkpoint
-            )
+            def temporal_op(dim):
+                return TemporalCNN(dim, kernel_size=3, use_checkpoint=use_checkpoint)
 
         # Initial input temporal operation
         self.input_temp_op = Residual(PreNorm(model_dim, temporal_op(model_dim)))

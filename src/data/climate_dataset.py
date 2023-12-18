@@ -98,9 +98,7 @@ class ClimateDataset(Dataset):
 
     def load_data(self, realization: str):
         """Loads the data from the specified paths and returns it as an xarray Dataset."""
-        realization_dir = os.path.join(
-            self.data_dir, realization, "*.nc"
-        )
+        realization_dir = os.path.join(self.data_dir, realization, "*.nc")
 
         # Open up the dataset and make sure it's sorted by time
         dataset = xr.open_mfdataset(realization_dir, combine="by_coords").sortby("time")
@@ -119,13 +117,15 @@ class ClimateDataset(Dataset):
         stacked_ds = ds.to_stacked_array(
             new_dim="var", sample_dims=["time", "lon", "lat"]
         ).transpose("var", "time", "lat", "lon")
- 
+
         # Convert the numpy array to a torch tensor
         tensor_data = torch.tensor(stacked_ds.to_numpy(), dtype=torch.float32)
 
         return tensor_data
 
-    def convert_tensor_to_xarray(self, tensor: torch.Tensor, coords : xr.DataArray = None) -> xr.Dataset:
+    def convert_tensor_to_xarray(
+        self, tensor: torch.Tensor, coords: xr.DataArray = None
+    ) -> xr.Dataset:
         """Generate an xarray dataset from a tensor of data"""
 
         assert len(tensor.shape) == 4, "Tensor must have shape (var, time, lat, lon)"
@@ -169,7 +169,7 @@ class ClimateDataLoader:
         dataset: ClimateDataset,
         accelerator: Accelerator,
         batch_size: int,
-        **dataloader_kwargs: dict[str, Any]
+        **dataloader_kwargs: dict[str, Any],
     ):
         self.dataset = dataset
         self.accelerator = accelerator

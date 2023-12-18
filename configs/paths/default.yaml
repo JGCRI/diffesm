@@ -13,4 +13,3 @@ save_dir: /research/hutchinson/data/ml_climate/saved_samples/
 
 # Path to where our quantiles will be saved to and accessed
 quantile_dir: /research/hutchinson/data/ml_climate/saved_quantiles/
-

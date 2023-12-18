@@ -58,7 +58,9 @@ class UNetTrainer(BaseTrainer):
         self.device = self.accelerator.device
         self.weight_dtype = torch.float32
 
-        self.optimizer = optimizer(self.model.parameters(), lr=self.lr * self.accelerator.num_processes)
+        self.optimizer = optimizer(
+            self.model.parameters(), lr=self.lr * self.accelerator.num_processes
+        )
 
         self.train_loader: ClimateDataLoader = dataloader(
             self.train_set,
@@ -176,7 +178,6 @@ class UNetTrainer(BaseTrainer):
 
         # Sample noise that we'll add to the clean images
         noise = torch.randn_like(clean_samples)
-        
 
         # If we are doing continuous diffusion, timesteps need to be from 0 - 1
         if isinstance(self.scheduler, ContinuousDDPM):
@@ -184,12 +185,11 @@ class UNetTrainer(BaseTrainer):
             timesteps = self.scheduler.log_snr(timesteps)
         else:
             timesteps = torch.randint(
-            0,
-            self.scheduler.config.num_train_timesteps,
-            (clean_samples.shape[0],),
-            device=self.device,
+                0,
+                self.scheduler.config.num_train_timesteps,
+                (clean_samples.shape[0],),
+                device=self.device,
             ).long()
-
 
         # Add noise to the clean images according to the noise magnitude at each timestep
         # (this is the forward diffusion process)

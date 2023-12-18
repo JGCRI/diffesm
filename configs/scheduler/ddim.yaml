@@ -4,4 +4,4 @@ beta_start: 0.0001
 beta_end: 0.02
 beta_schedule: linear
 clip_sample: False
-prediction_type: v_prediction 
+prediction_type: v_prediction

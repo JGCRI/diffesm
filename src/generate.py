@@ -56,12 +56,11 @@ def create_batches(
         # Append the batch to the list of batches
         data.append((tensor_data, dict(batch.coords)))
 
-
     return data
 
 
 def custom_collate_fn(
-    batches: list[tuple[Tensor, xr.DataArray]]
+    batches: list[tuple[Tensor, xr.DataArray]],
 ) -> tuple[Tensor, list[xr.DataArray]]:
     """Collate function for the dataloader. This is necessary because we want to keep track of the time coordinates
     for each batch, so we can convert the generated tensors back into xarray datasets
@@ -78,7 +77,7 @@ def custom_collate_fn(
     for batch in batches:
         tensor_batch.append(batch[0])
         coords.append(batch[1])
-    
+
     return torch.stack(tensor_batch), coords
 
 
@@ -147,15 +146,12 @@ def main(config: DictConfig) -> None:
 
         for i in range(len(gen_months)):
             gen_samples.append(
-                dataset.convert_tensor_to_xarray(
-                    gen_months[i], coords=coords[i]
-                )
+                dataset.convert_tensor_to_xarray(gen_months[i], coords=coords[i])
             )
 
     gen_samples = accelerator.gather_for_metrics(gen_samples)
     gen_samples = xr.concat(gen_samples, "time").drop_vars("height").sortby("time")
 
-    
     if accelerator.is_main_process:
         # Construct the save path
         save_name = f"{config.gen_mode}_{config.save_name + '_' if config.save_name is not None else ''}{config.variable}_{config.start_year}-{config.end_year}.nc"

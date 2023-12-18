@@ -14,9 +14,7 @@ from models.video_net import UNetModel3D
 @hydra.main(version_base=None, config_path="../configs", config_name="train.yaml")
 def main(cfg: DictConfig) -> None:
     # Create accelerator object and set RNG seed
-    accelerator = Accelerator(
-        **cfg.trainer.accelerator
-    )
+    accelerator = Accelerator(**cfg.trainer.accelerator)
     set_seed(cfg.seed)
 
     # Logger works with distributed processes
@@ -27,11 +25,14 @@ def main(cfg: DictConfig) -> None:
     train_cfg = dict(cfg.data.shared) | dict(cfg.data.train)
     val_cfg = dict(cfg.data.shared) | dict(cfg.data.val)
 
-    
     # Avoid race conditions when loading data
     with accelerator.main_process_first():
-        train_set: ClimateDataset = instantiate(train_cfg, data_dir=cfg.paths.data_dir, _recursive_=False)
-        val_set: ClimateDataset = instantiate(val_cfg, data_dir=cfg.paths.data_dir, _recursive_=False)
+        train_set: ClimateDataset = instantiate(
+            train_cfg, data_dir=cfg.paths.data_dir, _recursive_=False
+        )
+        val_set: ClimateDataset = instantiate(
+            val_cfg, data_dir=cfg.paths.data_dir, _recursive_=False
+        )
 
     logger.info(f"Instantiating model <{cfg.model._target_}>")
     model: UNetModel3D = instantiate(cfg.model)

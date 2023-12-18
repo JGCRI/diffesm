@@ -22,7 +22,6 @@ class BaseTrainer(ABC):
         """Denormalizes the batch to be between 0 and 1."""
         return (batch + 1) / 2
 
-
     @abstractmethod
     def validation_loop(self, epoch: int, sanity_check: bool = False) -> None:
         pass
@@ -30,7 +29,6 @@ class BaseTrainer(ABC):
     @abstractmethod
     def sample(self) -> None:
         pass
-
 
     @abstractmethod
     def save(self, epoch: int) -> None:

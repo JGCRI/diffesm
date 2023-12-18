@@ -26,6 +26,7 @@ dependencies:
   - imageio
   - scipy
   - libtiff5
+  - pre-commit
   - pip
   - pip:
     - imagen_pytorch

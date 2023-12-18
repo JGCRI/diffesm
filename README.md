@@ -34,7 +34,7 @@ To train the diffusion model, we first have to preprocess the data into a format
 Collect all data files into a single directory. Ensure each file is in `.nc` format.
 
 ### Step 2: Create Dataset Description
-Develop a JSON file to describe your dataset's structure and its variables. This file should outline at least three realizations for each of the training, validation, and testing sets. 
+Develop a JSON file to describe your dataset's structure and its variables. This file should outline at least three realizations for each of the training, validation, and testing sets.
 
 Example JSON structure:
 ```json
