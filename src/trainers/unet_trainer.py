@@ -15,13 +15,12 @@ from ema_pytorch import EMA
 
 from utils.viz_utils import create_gif
 from data.climate_dataset import ClimateDataset, ClimateDataLoader
-from trainers.base_trainer import BaseTrainer
 from models.video_net import UNetModel3D
 from utils.gen_utils import generate_samples
 from custom_diffusers.continuous_ddpm import ContinuousDDPM
 
 
-class UNetTrainer(BaseTrainer):
+class UNetTrainer:
     """Trainer class for 2D diffusion models."""
 
     def __init__(
@@ -100,6 +99,11 @@ class UNetTrainer(BaseTrainer):
 
         # Prepare everything for GPU training
         self.prepare()
+
+    def save_hyperparameters(self, cfg: DictConfig) -> None:
+        """Saves the hyperparameters as class attributes."""
+        for key, value in cfg.items():
+            setattr(self, key, value)
 
     def log_hparams(self):
         """Logs the hyperparameters to WANDB."""
