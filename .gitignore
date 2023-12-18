@@ -157,3 +157,7 @@ configs/local/default.yaml
 /outputs
 /checkpoints
 /wandb
+wandb
+
+outputs
+notebooks/test.ipynb
