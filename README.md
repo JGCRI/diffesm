@@ -119,7 +119,7 @@ make generate
 
 **Additional Notes:**
 
-- **Process Configuration:** The number of processes used during generation is set in the `scripts/gen_sample.sh`` script.
+- **Process Configuration:** The number of processes used during generation is set in the `scripts/gen_sample.sh` script.
 - **Time Consideration:** Depending on your hardware setup, the generation process may take several minutes.
 
 
