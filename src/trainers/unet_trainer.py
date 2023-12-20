@@ -147,6 +147,7 @@ class UNetTrainer:
                 ):
                     if step % self.accelerator.gradient_accumulation_steps == 0:
                         progress_bar.update(1)
+                    continue
 
                 loss = self.get_loss(batch)
 
@@ -215,7 +216,7 @@ class UNetTrainer:
             else:
                 raise NotImplementedError("Only epsilon and v_prediction supported")
 
-                # Calculate loss and update gradients
+            # Calculate loss and update gradients
             loss = mse_loss(model_output.float(), target.float())
             self.accelerator.backward(loss)
 
