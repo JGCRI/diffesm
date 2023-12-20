@@ -5,7 +5,7 @@ defaults:
 
 esm: IPSL         # The ESM you want to process
 scenario: rcp85   # The scenario you want to process
-var: pr         # The variable you want to process
+var: tas        # The variable you want to process
 
 gen_prefix: null  # If the generated data has a prefix attached to the name, specify it here
 

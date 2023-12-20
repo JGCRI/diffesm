@@ -5,17 +5,17 @@ defaults:
   - paths: default
 
 # Seed for random number generators
-seed: 50
+seed: 42
 
-load_path: checkpoints/ipsl_pr_rcp85_take2_2.pt
+load_path: checkpoints/ipsl_tas_rcp85_4.pt
 esm: IPSL
 scenario: rcp85
 gen_mode: gen  # Either gen/val/test
 batch_size: 8
-sample_steps: 100
+sample_steps: 250
 start_year: 2080
 end_year: 2100
-variable: pr   # Only works with a single variable, for now
+variable: tas   # Only works with a single variable, for now
 save_name: null  # Only set a save name if you want something special added to your save path
 
 dataset:

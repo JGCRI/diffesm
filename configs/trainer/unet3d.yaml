@@ -6,8 +6,8 @@ hyperparameters:
   save_every: 500
   batch_size: 4
   save_dir: checkpoints
-  save_name: ipsl_pr_rcp85_take2.pt
-  load_path: checkpoints/ipsl_pr_rcp85_take2_2.pt  # The path to checkpoint to load from
+  save_name: ipsl_tas_rcp85.pt
+  load_path: checkpoints/ipsl_tas_rcp85_4.pt  # The path to checkpoint to load from
   lr: 0.0001
   sample_steps: 250
 
@@ -29,5 +29,5 @@ optimizer:
 accelerator:
   mixed_precision: fp16
   split_batches: False
-  gradient_accumulation_steps: 16
+  gradient_accumulation_steps: 4
   log_with: wandb
