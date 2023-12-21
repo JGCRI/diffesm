@@ -1,0 +1,19 @@
+defaults:
+  - _self_
+  - data: ipsl
+  - model: unet_3d
+  - scheduler: continuousddpm
+  - trainer: unet3d
+  - paths: default
+
+# Seed for random number generators
+seed: 50
+
+wandb:
+  project: diffesm
+  project_name: diffesm
+  job_type: train
+  name: null
+  init_kwargs:
+    name: test
+    mode: online

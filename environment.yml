@@ -1,0 +1,34 @@
+name: diffesm
+channels:
+  - conda-forge
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.11
+  - pytorch=2.*
+  - pytorch-cuda=12.1
+  - xarray
+  - numpy
+  - tqdm
+  - accelerate
+  - diffusers
+  - einops
+  - hydra-core
+  - wandb
+  - ipykernel
+  - ipywidgets
+  - netcdf4
+  - dask
+  - matplotlib
+  - nc-time-axis
+  - cartopy
+  - moviepy
+  - imageio
+  - scipy
+  - libtiff5
+  - pre-commit
+  - pip
+  - pip:
+    - imagen_pytorch
+    - einops_exts
+    - ema_pytorch

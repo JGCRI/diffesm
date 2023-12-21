@@ -1,0 +1,33 @@
+_target_: trainers.unet_trainer.UNetTrainer
+
+hyperparameters:
+  max_epochs: 10
+  sample_every: 500
+  save_every: 500
+  batch_size: 4
+  save_dir: checkpoints
+  save_name: ipsl_tas_rcp85.pt
+  load_path: checkpoints/ipsl_tas_rcp85_4.pt  # The path to checkpoint to load from
+  lr: 0.0001
+  sample_steps: 250
+
+dataloader:
+  _target_: data.climate_dataset.ClimateDataLoader
+  _partial_: True
+  shuffle: True
+  num_workers: 0
+  pin_memory: false
+  drop_last: false
+
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: True
+  betas: [0.9, 0.99]
+
+
+accelerator:
+  mixed_precision: fp16
+  split_batches: False
+  gradient_accumulation_steps: 4
+  log_with: wandb

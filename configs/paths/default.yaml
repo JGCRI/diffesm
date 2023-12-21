@@ -1,0 +1,15 @@
+# path to root directory
+# Defaults to current working directory
+root_dir: .
+
+# Path to directory where processed netCDF4 files are stored
+data_dir: /dummy/path/to/prepared_data
+
+# Path to where the JSON files describing the data are stored
+json_data_dir: /dummy/path/to/json
+
+# Path to where our generated samples will be saved
+save_dir: /dummy/path/to/where/samples_are_saved
+
+# Path to where our quantiles will be saved to and accessed
+quantile_dir: /dummy/path/to/quantiles

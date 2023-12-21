@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: DiffESM
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Seth Bassetti
+    email: sethbassetti@gmail.com
+    affiliation: Utah State University
+  - given-names: Brian Hutchinson
+    email: Brian.Hutchinson@wwu.edu
+    affiliation: Western Washington University
+  - given-names: Claudia Tebaldi
+    affiliation: Joint Global Change Research Institute
+  - given-names: Ben Kravitz
+    affiliation: Indiana University
+repository-code: 'https://github.com/sethbassetti/diff-esm'
+abstract: >-
+  Using diffusion to approximate Earth System Model (ESM) in
+  the temperature and precipitation sphere. Generative
+  modeling of this kind can be used for identification of
+  future climate anomalies such as heat waves or dry spells.
+license: MIT
+doi: 10.5281/zenodo.10420734
+commit: 0b7dc01c3c9dfc6636a23cfe95ab609dfc3ea1b9
+date-released: '2023-12-18'
