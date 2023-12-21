@@ -1,5 +1,5 @@
 # DiffESM
-Using diffusion to approximate Earth System Model (ESM) in the temperature and precipitation sphere. Generative modeling of this kind can be used for identification of future climate anomalies such as heat waves or dry spells.
+Diffusion model software to emulate Earth System Models (ESMs) for daily temperature and precipitation. This software is capable of generating new daily precipitation or temperature data for previously unseen scenarios, with many potential applications (e.g., estimating or characterizing extreme weather phenomena such heat waves or dry spells under hypothetical future climate scenarios).
 
 ## Setup Instructions
 
@@ -124,4 +124,4 @@ make generate
 
 
 ## Visualization
-Finally, you are ready to visualize your results! The bulk of visualization is performed in the `notebooks/data-viz.ipynb` notebook. The configuration for the data vizualization is specified in `configs/data_viz.yaml`. Currently, the notebook only supports vizualizations for temperature and precipiation, although other variables can be added in the future.
+Finally, you are ready to visualize your results! The bulk of visualization is performed in the `notebooks/data-viz.ipynb` notebook. The configuration for the data vizualization is specified in `configs/data_viz.yaml`. Currently, the notebook only supports vizualizations for temperature and precipitation, although other variables can be added in the future.
