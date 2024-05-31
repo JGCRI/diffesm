@@ -5,9 +5,11 @@ import torch
 import torch.nn as nn
 from einops_exts import rearrange_many
 from einops import rearrange
-from rotary_embedding_torch import RotaryEmbedding
+
 
 from torch.utils import checkpoint as torch_checkpoint
+
+from models.rotary_embedding import RotaryEmbedding
 
 
 def checkpoint(fn, *args, enabled=False):
@@ -415,7 +417,6 @@ class Attention(nn.Module):
         q = q * self.scale
 
         # rotate positions into queries and keys for time attention
-
         if exists(self.rotary_emb):
             q = self.rotary_emb.rotate_queries_or_keys(q)
             k = self.rotary_emb.rotate_queries_or_keys(k)
@@ -566,6 +567,7 @@ class UNetModel3D(nn.Module):
         attn_heads=8,
         attn_dim_head=32,
         use_sparse_linear_attn=True,
+        use_mid_attn=False,
         init_kernel_size=7,
         resnet_groups=8,
         use_checkpoint=False,
@@ -596,7 +598,7 @@ class UNetModel3D(nn.Module):
             (1, init_kernel_size, init_kernel_size),
             padding=(0, init_padding, init_padding),
         )
-
+        rotary_emb = RotaryEmbedding(min(32, attn_dim_head))
         # If we are using temporal attn over convolution
         if use_temp_attn:
             # Define positional encodings and a temporal attention constructor
@@ -604,8 +606,6 @@ class UNetModel3D(nn.Module):
                 heads=attn_heads, max_distance=32
             )
 
-            # Create rotary embeddings for positional information
-            rotary_emb = RotaryEmbedding(32)
 
             # Create temporal attention operation only just frames
             def temporal_op(dim):
@@ -625,6 +625,19 @@ class UNetModel3D(nn.Module):
             # Otherwise use temporal convolutions only
             def temporal_op(dim):
                 return TemporalCNN(dim, kernel_size=3, use_checkpoint=use_checkpoint)
+
+        # Define positional encodings and a temporal attention constructor
+        self.time_rel_pos_bias = RelativePositionBias(
+            heads=attn_heads, max_distance=32
+        )
+        def temporal_attn(dim):
+            return EinopsToAndFrom(
+                "b c f h w",
+                "b (h w) f c",
+                Attention(
+                    dim, heads=attn_heads, dim_head=attn_dim_head, rotary_emb=rotary_emb
+                ),
+            )
 
         # Initial input temporal operation
         self.input_temp_op = Residual(PreNorm(model_dim, temporal_op(model_dim)))
@@ -663,6 +676,7 @@ class UNetModel3D(nn.Module):
         # Constructing down blocks of U-Net
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (num_resolutions - 1)
+            has_attn = ind >= (num_resolutions - 3)
 
             # Downblock: 2 Residual Blocks, 1 spatial linear attention, 1 temporal attention, 1 downsample (at all but last levels)
             self.downs.append(
@@ -670,19 +684,21 @@ class UNetModel3D(nn.Module):
                     [
                         block_klass_cond(dim_in, dim_out),
                         block_klass_cond(dim_out, dim_out),
-                        Residual(
-                            PreNorm(
-                                dim_out,
-                                SpatialLinearAttention(
+                        (
+                            Residual(
+                                PreNorm(
                                     dim_out,
-                                    heads=attn_heads,
-                                    use_checkpoint=use_checkpoint,
-                                ),
+                                    SpatialLinearAttention(
+                                        dim_out,
+                                        heads=attn_heads,
+                                        use_checkpoint=use_checkpoint,
+                                    ),
+                                )
                             )
-                        )
-                        if use_sparse_linear_attn
-                        else nn.Identity(),
-                        Residual(PreNorm(dim_out, temporal_op(dim_out))),
+                            if use_sparse_linear_attn or has_attn
+                            else nn.Identity()
+                        ),
+                        Residual(PreNorm(dim_out, temporal_op(dim_out) if not has_attn else temporal_attn(dim_out))),
                         Downsample(dim_out) if not is_last else nn.Identity(),
                     ]
                 )
@@ -694,7 +710,7 @@ class UNetModel3D(nn.Module):
         self.mid_block1 = block_klass_cond(mid_dim, mid_dim)
 
         # Only do spatial attn on middle layer if we are using spatial attn
-        if use_sparse_linear_attn:
+        if use_mid_attn:
             spatial_attn = EinopsToAndFrom(
                 "b c f h w",
                 "b f (h w) c",
@@ -705,12 +721,14 @@ class UNetModel3D(nn.Module):
         else:
             self.mid_spatial_attn = nn.Identity()
 
-        self.mid_temporal_attn = Residual(PreNorm(mid_dim, temporal_op(mid_dim)))
+        self.mid_temporal_attn = Residual(PreNorm(mid_dim, temporal_attn(mid_dim)))
         self.mid_block2 = block_klass_cond(mid_dim, mid_dim)
 
         # Construct Up Blocks
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
+
             is_last = ind >= (num_resolutions - 1)
+            has_attn = ind in [0, 1, 2]
 
             # Up Block: 2 Residual blocks, 1 spatial attention, 1 temporal attention, 1 upsampling layer
             self.ups.append(
@@ -720,19 +738,21 @@ class UNetModel3D(nn.Module):
                             dim_out * 2, dim_in
                         ),  # dim_out * 2 to account for incoming residual connection
                         block_klass_cond(dim_in, dim_in),
-                        Residual(
-                            PreNorm(
-                                dim_in,
-                                SpatialLinearAttention(
+                        (
+                            Residual(
+                                PreNorm(
                                     dim_in,
-                                    heads=attn_heads,
-                                    use_checkpoint=use_checkpoint,
-                                ),
+                                    SpatialLinearAttention(
+                                        dim_in,
+                                        heads=attn_heads,
+                                        use_checkpoint=use_checkpoint,
+                                    ),
+                                )
                             )
-                        )
-                        if use_sparse_linear_attn
-                        else nn.Identity(),
-                        Residual(PreNorm(dim_in, temporal_op(dim_in))),
+                            if use_sparse_linear_attn or has_attn
+                            else nn.Identity()
+                        ),
+                        Residual(PreNorm(dim_in, temporal_op(dim_in) if not has_attn else temporal_attn(dim_in))),
                         Upsample(dim_in) if not is_last else nn.Identity(),
                     ]
                 )
@@ -768,7 +788,8 @@ class UNetModel3D(nn.Module):
             timesteps = timesteps[None].to(x.device)
 
         # If we are using attn for temporal representation
-        if self.use_temp_attn:
+            
+        if exists(self.time_rel_pos_bias):
             # Create keyword arguments for attention operations
             time_rel_pos_bias = self.time_rel_pos_bias(x.shape[2], device=x.device)
             focus_present_mask = default(

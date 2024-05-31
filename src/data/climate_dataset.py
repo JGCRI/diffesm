@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 from torch.utils.data import Dataset, DataLoader
 from accelerate import Accelerator
+import dask
 
 # Constants for the minimum and maximum of our datasets
 MIN_MAX_CONSTANTS = {"tas": (-85.0, 60.0), "pr": (0.0, 6.0)}
@@ -17,12 +18,12 @@ PREPROCESS_FN = {"tas": lambda x: x - 273.15, "pr": lambda x: x * 86400}
 
 # Normalization and Inverse Normalization functions
 NORM_FN = {
-    "tas": lambda x: x / 20,
-    "pr": lambda x: np.log(1 + x),
+    "tas": lambda x: (x - 4.5) / 21.0,
+    "pr": lambda x: np.cbrt(x),
 }
 DENORM_FN = {
-    "tas": lambda x: x * 20,
-    "pr": lambda x: np.exp(x) - 1,
+    "tas": lambda x: x * 21.0 + 4.5,
+    "pr": lambda x: x**3,
 }
 
 # These functions transform the range of the data to [-1, 1]
@@ -75,9 +76,11 @@ class ClimateDataset(Dataset):
         data_dir: str,
         scenario: str,
         vars: list[str],
+        spatial_resolution=None,
     ):
         self.seq_len = seq_len
         self.realizations = realizations
+        self.spatial_resolution = spatial_resolution
 
         self.data_dir = os.path.join(data_dir, esm, scenario)
 
@@ -98,6 +101,7 @@ class ClimateDataset(Dataset):
 
     def load_data(self, realization: str):
         """Loads the data from the specified paths and returns it as an xarray Dataset."""
+
         realization_dir = os.path.join(self.data_dir, realization, "*.nc")
 
         # Open up the dataset and make sure it's sorted by time
@@ -108,6 +112,11 @@ class ClimateDataset(Dataset):
 
         # Apply preprocessing and normalization
         self.xr_data = dataset.map(preprocess).map(normalize)
+
+        if self.spatial_resolution is not None:
+            with dask.config.set(**{'array.slicing.split_large_chunks' : False}):
+                self.xr_data = self.xr_data.coarsen(lon=3, lat=2).mean()
+
         self.tensor_data = self.convert_xarray_to_tensor(self.xr_data)
 
     def convert_xarray_to_tensor(self, ds: xr.Dataset) -> torch.Tensor:

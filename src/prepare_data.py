@@ -82,7 +82,7 @@ def collect_var_data(path_list: list[str], base_dir: str) -> xr.Dataset:
     all_data = []
     for path in path_list:
         all_data.append(xr.open_dataset(os.path.join(base_dir, path)))
-    return xr.concat(all_data, dim="time").sortby("time")
+    return xr.concat(all_data, dim="time").sortby("time").drop("time_bnds")
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="prepare_data")
@@ -108,18 +108,19 @@ def main(cfg: DictConfig):
         cfg.scenario,
     )
 
-    start_year = data["start_year"]
-    end_year = data["end_year"]
+    start_year = cfg.start_year
+    end_year = cfg.end_year
 
     # Iterate through each realization in our JSON file
     for realization, realization_data in data["realizations"].items():
+        if realization in ["r1", "r2"]:
+            print(realization)
+            continue
         # Merge the two variables together
-        dataset = xr.merge(
-            [
-                collect_var_data(path_list, load_dir)
-                for path_list in realization_data.values()
-            ]
-        )
+        datasets = [collect_var_data(path_list, load_dir) for path_list in reversed(realization_data.values())]
+        datasets[1] = datasets[1].assign_coords({"time" : datasets[0].time})
+
+        dataset = xr.merge(datasets, join="right", compat="override")
 
         dataset = process_dataset(dataset, start_year, end_year)
         print(f"Finished processing realization {realization}")

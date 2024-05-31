@@ -36,6 +36,7 @@ def main(cfg: DictConfig) -> None:
 
     logger.info(f"Instantiating model <{cfg.model._target_}>")
     model: UNetModel3D = instantiate(cfg.model)
+    logger.info(str(model))
 
     logger.info(f"Instantiating scheduler <{cfg.scheduler._target_}>")
     scheduler: DDPMScheduler = instantiate(cfg.scheduler)

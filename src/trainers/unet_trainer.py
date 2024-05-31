@@ -1,4 +1,5 @@
 import os
+import random
 from typing import Any, Callable
 
 import torch
@@ -18,6 +19,23 @@ from data.climate_dataset import ClimateDataset, ClimateDataLoader
 from models.video_net import UNetModel3D
 from utils.gen_utils import generate_samples
 from custom_diffusers.continuous_ddpm import ContinuousDDPM
+
+
+def calc_mse_loss(model_output, target):
+    """Manually calculate mse loss"""
+    spatial_loss = (model_output - target) ** 2
+
+    # Weight the equator more heavily than the poles
+    latitude = torch.linspace(
+        -80, 80, spatial_loss.shape[-2], device=spatial_loss.device
+    )
+    latitude_rad = torch.deg2rad(latitude)
+    latitude_weight = torch.cos(latitude_rad)
+
+    # Weight the loss
+    lat_weighted_loss = (spatial_loss * latitude_weight).mean()
+
+    return lat_weighted_loss
 
 
 class UNetTrainer:
@@ -176,6 +194,18 @@ class UNetTrainer:
 
             progress_bar.close()
 
+    def get_original_sample(self, noisy_sample, model_output, timesteps):
+        
+        alpha_prod_t = self.scheduler.alphas_cumprod[timesteps].view(-1, 1, 1, 1, 1)
+        beta_prod_t = 1 - alpha_prod_t
+
+        pred_original_sample = (alpha_prod_t**0.5) * noisy_sample - (beta_prod_t**0.5) * model_output
+
+        return pred_original_sample
+
+
+
+
     def get_loss(self, batch):
         clean_samples = batch.to(self.weight_dtype)
         cond_map = reduce(clean_samples, "b v t h w -> b v 1 h w", "mean").repeat(
@@ -217,7 +247,22 @@ class UNetTrainer:
                 raise NotImplementedError("Only epsilon and v_prediction supported")
 
             # Calculate loss and update gradients
-            loss = mse_loss(model_output.float(), target.float())
+            mse_loss = calc_mse_loss(model_output, target)
+
+            # Calculate the avg conditional loss
+            pred_original_sample = self.get_original_sample(noisy_samples, model_output, timesteps)
+
+            # Get the mean of both the clean and the predicted original sample
+            clean_mean = clean_samples.mean(dim=-3)
+            pred_mean = pred_original_sample.mean(dim=-3)
+
+            cond_loss = ((clean_mean - pred_mean) ** 2).mean()
+
+            # Calculate the loss
+            loss = mse_loss + cond_loss * self.cond_loss_scaling
+
+
+            # Scale the loss by cosine-weighted latitude
             self.accelerator.backward(loss)
 
             if self.accelerator.sync_gradients:
@@ -253,7 +298,7 @@ class UNetTrainer:
 
         self.ema_model.eval()
         # Grab a random sample from validation set
-        batch = next(iter(self.val_loader.generate()))[0:1]
+        batch = random.choice(self.val_set).unsqueeze(0).to(self.accelerator.device)
 
         clean_samples = batch.to(self.weight_dtype)
 

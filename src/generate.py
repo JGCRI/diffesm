@@ -14,6 +14,7 @@ from accelerate import Accelerator
 from diffusers import DDPMScheduler
 import xarray as xr
 from tqdm import tqdm
+import pandas as pd
 
 # Local imports
 from data.climate_dataset import ClimateDataset
@@ -24,6 +25,17 @@ Checkpoint = dict[str, Union[int, OrderedDict]]
 # Assumes that gen is conditioned on val, and the first realization
 # is always reserved for the test set
 realization_dict = {"gen": "r2", "val": "r2", "test": "r1"}
+
+
+def get_starting_index(directory: str) -> int:
+    """Goes through a directory of files named "member_i.nc" and returns the next available index."""
+    files = os.listdir(directory)
+    indices = [
+        int(file.split("_")[1].split(".")[0])
+        for file in files
+        if file.startswith("member")
+    ]
+    return max(indices) + 1 if indices else 0
 
 
 def create_batches(
@@ -92,6 +104,11 @@ def main(config: DictConfig) -> None:
         assert config.load_path, "Must specify a load path"
         assert os.path.isfile(config.load_path), "Invalid load path"
 
+    # Make sure num samples is 1 if gen mode is not gen
+    assert (
+        config.samples_per == 1 or config.gen_mode == "gen"
+    ), "Number of samples must be 1 for val and test"
+
     # Initialize all necessary objects
     accelerator = Accelerator(**config.accelerator, even_batches=False)
 
@@ -101,7 +118,8 @@ def main(config: DictConfig) -> None:
         scenario=config.scenario,
         data_dir=config.paths.data_dir,
         realizations=[realization_dict[config.gen_mode]],
-        vars=[config.variable],
+        vars=config.variables,
+        spatial_resolution=config.spatial_resolution
     )
     scheduler: DDPMScheduler = instantiate(config.scheduler)
     scheduler.set_timesteps(config.sample_steps)
@@ -110,8 +128,10 @@ def main(config: DictConfig) -> None:
         # Load the model from the checkpoint
         chkpt: Checkpoint = torch.load(config.load_path, map_location="cpu")
         model = chkpt["EMA"].eval()
+        model = model.to(accelerator.device)
     else:
         model = None
+
     # Grab the Xarray dataset from the dataset object
     xr_ds = dataset.xr_data.load()
 
@@ -128,43 +148,56 @@ def main(config: DictConfig) -> None:
     # Prepare the model and dataloader for distributed training
     model, dataloader = accelerator.prepare(model, dataloader)
 
-    gen_samples = []
+    for i in tqdm(range(config.samples_per)):
+        gen_samples = []
 
-    for tensor_batch, coords in tqdm(
-        dataloader, disable=not accelerator.is_main_process
-    ):
-        if model is not None:
-            gen_months = generate_samples(
-                tensor_batch,
-                scheduler=scheduler,
-                sample_steps=config.sample_steps,
-                model=model,
-                disable=not accelerator.is_main_process,
+        for tensor_batch, coords in tqdm(
+            dataloader, disable=not accelerator.is_main_process
+        ):
+            tensor_batch = tensor_batch.to(accelerator.device)
+            if model is not None:
+                gen_months = generate_samples(
+                    tensor_batch,
+                    scheduler=scheduler,
+                    sample_steps=config.sample_steps,
+                    model=model,
+                    disable=True,
+                )
+            else:
+                gen_months = tensor_batch
+
+            for i in range(len(gen_months)):
+                gen_samples.append(
+                    dataset.convert_tensor_to_xarray(gen_months[i], coords=coords[i])
+                )
+
+        gen_samples = accelerator.gather_for_metrics(gen_samples)
+        gen_samples = xr.concat(gen_samples, "time").drop_vars("height").sortby("time")
+
+        if accelerator.is_main_process:
+
+            # If we are generating multiple samples, create a directory for them
+            save_name = f"{config.gen_mode}_{config.save_name + '_' if config.save_name is not None else ''}{'_'.join(config.variables)}_{config.start_year}-{config.end_year}.nc"
+            save_path = os.path.join(
+                config.paths.save_dir, config.esm, config.scenario, save_name
             )
-        else:
-            gen_months = tensor_batch
+            if config.gen_mode == "gen" and config.samples_per > 1:
+                save_dir = save_path.strip(".nc")
+                if not os.path.isdir(save_dir):
+                    os.mkdir(save_dir)
 
-        for i in range(len(gen_months)):
-            gen_samples.append(
-                dataset.convert_tensor_to_xarray(gen_months[i], coords=coords[i])
-            )
+                mem_index = get_starting_index(save_dir)
+                save_path = os.path.join(save_dir, f"member_{mem_index}.nc")
 
-    gen_samples = accelerator.gather_for_metrics(gen_samples)
-    gen_samples = xr.concat(gen_samples, "time").drop_vars("height").sortby("time")
+            else:
+                # Delete the file if it already exists (avoids permission denied errors)
+                if os.path.isfile(save_path):
+                    os.remove(save_path)
 
-    if accelerator.is_main_process:
-        # Construct the save path
-        save_name = f"{config.gen_mode}_{config.save_name + '_' if config.save_name is not None else ''}{config.variable}_{config.start_year}-{config.end_year}.nc"
-        save_path = os.path.join(
-            config.paths.save_dir, config.esm, config.scenario, save_name
-        )
-        # Delete the file if it already exists (avoids permission denied errors)
-        if os.path.isfile(save_path):
-            os.remove(save_path)
-        # Save the generated samples
-        gen_samples.to_netcdf(save_path)
+            # Save the generated samples
+            gen_samples.to_netcdf(save_path)
 
-        os.chmod(save_path, 0o770)
+            os.chmod(save_path, 0o770)
 
 
 if __name__ == "__main__":

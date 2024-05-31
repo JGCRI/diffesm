@@ -29,13 +29,15 @@ def main(cfg: DictConfig):
     )
 
     # Extract the xarray dataset and denormalize it
-    xr_ds = dataset.xr_data.map(denorm).sel(time=slice(START_YEAR, END_YEAR))
+    xr_ds = dataset.xr_data.map(denorm).sel(time=slice(START_YEAR, END_YEAR)).compute()
+    breakpoint()
+    # Group by each day of the year
+    groups = xr_ds.groupby("time.dayofyear")
 
-    # Compute the quantiles
-    quantiles = xr_ds.load().quantile(cfg.quantile, dim="time").drop_vars("quantile")
+    quantiles = groups.quantile(q=[0.9, 0.95, 0.99, 0.999], dim="time")
 
     # Save the quantiles
-    save_name = f"{cfg.var}_{int(cfg.quantile * 100)}.nc"
+    save_name = f"{cfg.var}_quantiles.nc"
     save_path = os.path.join(cfg.paths.quantile_dir, cfg.esm, save_name)
 
     # Delete the file if it already exists (avoids permission denied errors)
